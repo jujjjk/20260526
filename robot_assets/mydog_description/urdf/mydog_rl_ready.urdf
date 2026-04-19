@@ -1,0 +1,485 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="mydog">
+  <link name="base_link">
+    <inertial>
+      <origin xyz="-0.105 -1.70200847193566E-18 -0.0524050771331315" rpy="0 0 0" />
+      <mass value="0.210311173097364" />
+      <inertia ixx="0.000418134046945269" ixy="1.74423204889991E-08" ixz="-8.55304753379831E-22" iyy="0.00072839928147298" iyz="-6.64391468002592E-21" izz="0.000816896416868302" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://mydog_description/meshes/base_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://mydog_description/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="lf_hip">
+    <inertial>
+      <origin xyz="-0.0224123714717193 3.46521422667223E-13 -6.26906588159712E-05" rpy="0 0 0" />
+      <mass value="0.182382758104873" />
+      <inertia ixx="0.000126686811945173" ixy="3.95742473689468E-16" ixz="-1.71117122824554E-07" iyy="8.66279482181998E-05" iyz="1.91882345389318E-11" izz="8.19833718653844E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lf_hip.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lf_hip.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="lf_hip" type="revolute">
+    <origin xyz="0.0405 0.045 -0.0425" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="lf_hip" />
+    <axis xyz="-1 0 0" />
+    <limit lower="-0.698" upper="0.314" effort="17" velocity="44" />
+  </joint>
+  <link name="lf_thigh">
+    <inertial>
+      <origin xyz="-1.37033676064768E-06 0.0119848794491349 -0.00856326470097551" rpy="0 0 0" />
+      <mass value="0.42955945040204" />
+      <inertia ixx="0.000279248950416298" ixy="1.42708644353112E-09" ixz="-7.41349571141139E-09" iyy="0.00039312042285744" iyz="-1.51077009857706E-06" izz="0.000199559011391425" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lf_thigh.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lf_thigh.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="lf_thigh" type="revolute">
+    <origin xyz="0.0445 0.0179 0" rpy="0 0 0" />
+    <parent link="lf_hip" />
+    <child link="lf_thigh" />
+    <axis xyz="0 -1 0" />
+    <limit lower="-0.646" upper="1.57" effort="17" velocity="44" />
+  </joint>
+  <link name="lf_calf">
+    <inertial>
+      <origin xyz="0.000111408035685351 -0.0150000615874885 -0.0783166957771906" rpy="0 0 0" />
+      <mass value="0.0197893757415935" />
+      <inertia ixx="2.96247231546076E-05" ixy="5.83616095674413E-12" ixz="1.27200044284202E-11" iyy="2.94597515614904E-05" iyz="5.63912591935272E-11" izz="1.47723502880074E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lf_calf.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lf_calf.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="lf_calf" type="revolute">
+    <origin xyz="-0.00011148 0.073 -0.156" rpy="0 0 0" />
+    <parent link="lf_thigh" />
+    <child link="lf_calf" />
+    <axis xyz="0 -1 0" />
+    <limit lower="-2.443" upper="2.443" effort="17" velocity="44" />
+  </joint>
+  <link name="lf_foot">
+    <inertial>
+      <origin xyz="-2.09269545997648E-07 6.96730477062202E-08 0.016099665842982" rpy="0 0 0" />
+      <mass value="0.0165731234899718" />
+      <inertia ixx="1.62971777866932E-06" ixy="3.14018149487118E-11" ixz="-3.74262782890753E-11" iyy="2.24154059357759E-06" iyz="-7.97693596481891E-11" izz="2.06995116065169E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lf_foot.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.013" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.013" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="lf_foot" type="fixed">
+    <origin xyz="0.00011148 -0.015 -0.169" rpy="0 0 0" />
+    <parent link="lf_calf" />
+    <child link="lf_foot" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="rf_hip">
+    <inertial>
+      <origin xyz="-0.0224123714717193 -6.26907182656594E-05 -5.91031668051301E-11" rpy="0 0 0" />
+      <mass value="0.182382758104873" />
+      <inertia ixx="0.000126686811945173" ixy="-1.71129806846609E-07" ixz="-1.26836263010042E-11" iyy="8.62479925698518E-05" iyz="1.9188234535176E-11" izz="8.23633275137325E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rf_hip.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rf_hip.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rf_hip" type="revolute">
+    <origin xyz="0.0405 -0.045 -0.0425" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="rf_hip" />
+    <axis xyz="-1 0 0" />
+    <limit lower="-0.314" upper="0.698" effort="17" velocity="44" />
+  </joint>
+  <link name="rf_thigh">
+    <inertial>
+      <origin xyz="1.37033676067544E-06 -0.0119848794491349 -0.00861649926969918" rpy="0 0 0" />
+      <mass value="0.429559450402041" />
+      <inertia ixx="0.000279248950416298" ixy="1.42708644269123E-09" ixz="7.41349571128629E-09" iyy="0.000393120422857439" iyz="1.85302971147873E-06" izz="0.000199559011391425" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rf_thigh.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rf_thigh.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rf_thigh" type="revolute">
+    <origin xyz="0.0445 -0.0179 0" rpy="0 0 0" />
+    <parent link="rf_hip" />
+    <child link="rf_thigh" />
+    <axis xyz="0 1 0" />
+    <limit lower="-1.57" upper="0.646" effort="17" velocity="44" />
+  </joint>
+  <link name="rf_calf">
+    <inertial>
+      <origin xyz="-0.000111556334854573 0.0149999384125115 -0.0783166957772806" rpy="0 0 0" />
+      <mass value="0.0197893757415934" />
+      <inertia ixx="2.96247231546073E-05" ixy="5.83616096054043E-12" ixz="1.27200044296092E-11" iyy="2.94597515614902E-05" iyz="5.63912591848607E-11" izz="1.47723502880073E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rf_calf.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rf_calf.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rf_calf" type="revolute">
+    <origin xyz="0.00011148 -0.073 -0.156" rpy="0 0 0" />
+    <parent link="rf_thigh" />
+    <child link="rf_calf" />
+    <axis xyz="0 1 0" />
+    <limit lower="-2.443" upper="2.443" effort="17" velocity="44" />
+  </joint>
+  <link name="rf_foot">
+    <inertial>
+      <origin xyz="2.09269546302959E-07 -6.96730477617313E-08 0.016099665842982" rpy="0 0 0" />
+      <mass value="0.0165731234899719" />
+      <inertia ixx="1.62971777866932E-06" ixy="3.14018149422214E-11" ixz="3.74262782971151E-11" iyy="2.24154059357759E-06" iyz="7.97693596512093E-11" izz="2.06995116065169E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rf_foot.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.013" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.013" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rf_foot" type="fixed">
+    <origin xyz="-0.00011148 0.015 -0.169" rpy="0 0 0" />
+    <parent link="rf_calf" />
+    <child link="rf_foot" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="rh_hip">
+    <inertial>
+      <origin xyz="0.0224123714717193 6.26907182656525E-05 -5.91031598662362E-11" rpy="0 0 0" />
+      <mass value="0.182382758104873" />
+      <inertia ixx="0.000126686811945173" ixy="-1.71129806846609E-07" ixz="1.26836263014264E-11" iyy="8.62479925698518E-05" iyz="-1.9188234536044E-11" izz="8.23633275137325E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rh_hip.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rh_hip.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rh_hip" type="revolute">
+    <origin xyz="-0.2505 -0.045 -0.0425" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="rh_hip" />
+    <axis xyz="1 0 0" />
+    <limit lower="-0.698" upper="0.314" effort="17" velocity="44" />
+  </joint>
+  <link name="rh_thigh">
+    <inertial>
+      <origin xyz="-1.76010526534154E-06 -0.0119848794539333 -0.00856326480293162" rpy="0 0 0" />
+      <mass value="0.429559450437959" />
+      <inertia ixx="0.000279248932589364" ixy="1.35760081511697E-09" ixz="-3.05848297374224E-08" iyy="0.000393120423564499" iyz="1.51077012314479E-06" izz="0.000199559029925528" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rh_thigh.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rh_thigh.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rh_thigh" type="revolute">
+    <origin xyz="-0.0445 -0.0179 0" rpy="0 0 0" />
+    <parent link="rh_hip" />
+    <child link="rh_thigh" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.646" upper="1.57" effort="17" velocity="44" />
+  </joint>
+  <link name="rh_calf">
+    <inertial>
+      <origin xyz="7.40038748614502E-08 0.0150000615911815 -0.0783166621566863" rpy="0 0 0" />
+      <mass value="0.0197893757548061" />
+      <inertia ixx="2.96247231942042E-05" ixy="5.83633823151134E-12" ixz="-1.27213281980368E-11" iyy="2.94597515910045E-05" iyz="-5.6394963074725E-11" izz="1.47723503893506E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rh_calf.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rh_calf.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rh_calf" type="revolute">
+    <origin xyz="0 -0.073 -0.156" rpy="0 0 0" />
+    <parent link="rh_thigh" />
+    <child link="rh_calf" />
+    <axis xyz="0 1 0" />
+    <limit lower="-2.443" upper="2.443" effort="17" velocity="44" />
+  </joint>
+  <link name="rh_foot">
+    <inertial>
+      <origin xyz="2.09269546053159E-07 -6.96730478172425E-08 0.016099665842982" rpy="0 0 0" />
+      <mass value="0.0165731234899718" />
+      <inertia ixx="1.62971777866932E-06" ixy="3.14018149414209E-11" ixz="3.74262782845742E-11" iyy="2.24154059357758E-06" iyz="7.97693596410887E-11" izz="2.06995116065168E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/rh_foot.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.013" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.013" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rh_foot" type="fixed">
+    <origin xyz="0 0.015 -0.168999999999539" rpy="0 0 0" />
+    <parent link="rh_calf" />
+    <child link="rh_foot" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="lh_hip">
+    <inertial>
+      <origin xyz="0.0224123714717193 -6.26907182656594E-05 5.91031598662362E-11" rpy="0 0 0" />
+      <mass value="0.182382758104873" />
+      <inertia ixx="0.000126686811945173" ixy="1.7112980684661E-07" ixz="-1.26836263017949E-11" iyy="8.62479925698518E-05" iyz="-1.918823453751E-11" izz="8.23633275137325E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lh_hip.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lh_hip.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="lh_hip" type="revolute">
+    <origin xyz="-0.2505 0.045 -0.0425" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="lh_hip" />
+    <axis xyz="1 0 0" />
+    <limit lower="-0.314" upper="0.698" effort="17" velocity="44" />
+  </joint>
+  <link name="lh_thigh">
+    <inertial>
+      <origin xyz="-1.37033676070319E-06 0.0119848794491349 -0.00861649926969918" rpy="0 0 0" />
+      <mass value="0.42955945040204" />
+      <inertia ixx="0.000279248950416298" ixy="1.42708644269078E-09" ixz="-7.41349571128488E-09" iyy="0.000393120422857439" iyz="-1.85302971147873E-06" izz="0.000199559011391425" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lh_thigh.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lh_thigh.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="lh_thigh" type="revolute">
+    <origin xyz="-0.0445 0.0179 0" rpy="0 0 0" />
+    <parent link="lh_hip" />
+    <child link="lh_thigh" />
+    <axis xyz="0 -1 0" />
+    <limit lower="-1.57" upper="0.646" effort="17" velocity="44" />
+  </joint>
+  <link name="lh_calf">
+    <inertial>
+      <origin xyz="0.000111408185233142 -0.0150000615874885 -0.0783166957772808" rpy="0 0 0" />
+      <mass value="0.0197893757415934" />
+      <inertia ixx="2.96247231546074E-05" ixy="5.83616096183456E-12" ixz="1.2720004452505E-11" iyy="2.94597515614902E-05" iyz="5.63912591888534E-11" izz="1.47723502880073E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lh_calf.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lh_calf.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="lh_calf" type="revolute">
+    <origin xyz="-0.00011148 0.073 -0.156" rpy="0 0 0" />
+    <parent link="lh_thigh" />
+    <child link="lh_calf" />
+    <axis xyz="0 -1 0" />
+    <limit lower="-2.443" upper="2.443" effort="17" velocity="44" />
+  </joint>
+  <link name="lh_foot">
+    <inertial>
+      <origin xyz="-2.09269546053159E-07 6.96730477756091E-08 0.016099665842982" rpy="0 0 0" />
+      <mass value="0.0165731234899719" />
+      <inertia ixx="1.62971777866932E-06" ixy="3.14018149492581E-11" ixz="-3.74262782906894E-11" iyy="2.2415405935776E-06" iyz="-7.97693596469403E-11" izz="2.0699511606517E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/nszb/python_text/robot_assets/mydog_description/meshes/lh_foot.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.013" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.013" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="lh_foot" type="fixed">
+    <origin xyz="0.000111482260043261 -0.015 -0.169000033589626" rpy="0 0 0" />
+    <parent link="lh_calf" />
+    <child link="lh_foot" />
+    <axis xyz="0 0 0" />
+  </joint>
+</robot>
