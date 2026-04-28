@@ -1,0 +1,17 @@
+# 忽略 Python 虚拟环境
+env-isaaclab/
+pyvenv.cfg
+
+# 忽略 RL 训练日志、TensorBoard 数据和模型权重
+logs/
+*.pt
+*.onnx
+*.nszb.*
+
+# 忽略 Python 编译缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 忽略 VS Code 配置（可选）
+.vscode/

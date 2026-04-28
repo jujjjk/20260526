@@ -1,6 +1,14 @@
 # 排除大型依赖目录
 lsaacGym/env-isaaclab/
-lsaacGym/IsaacLab/
+lsaacGym/IsaacLab/.git*/
+lsaacGym/IsaacLab/logs/
+lsaacGym/IsaacLab/outputs/
+lsaacGym/IsaacLab/.vscode/
+lsaacGym/IsaacLab/__pycache__/
+lsaacGym/IsaacLab/**/*.py[cod]
+lsaacGym/IsaacLab/*.pt
+lsaacGym/IsaacLab/*.onnx
+lsaacGym/IsaacLab/*.nszb.*
 
 # Python
 __pycache__/
