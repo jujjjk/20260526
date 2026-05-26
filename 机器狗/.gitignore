@@ -1,0 +1,43 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.vs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# ROS / colcon generated output
+build/
+install/
+log/
+
+# Native build artifacts
+*.o
+*.obj
+*.elf
+*.axf
+*.hex
+*.bin
+*.map
+*.lst
+*.dep
+*.d
+
+# Keil / MDK generated output
+Listings/
+Objects/
+*.uvguix.*
+*.scvd
+*.htm
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+~$*

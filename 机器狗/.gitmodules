@@ -1,0 +1,11 @@
+[submodule "A1/unitree_cad"]
+	path = A1/unitree_cad
+	url = https://github.com/unitreerobotics/unitree_cad.git
+
+[submodule "URDF/A1/unitree_ros"]
+	path = URDF/A1/unitree_ros
+	url = https://github.com/unitreerobotics/unitree_ros.git
+
+[submodule "URDF/unitree_ros"]
+	path = URDF/unitree_ros
+	url = https://github.com/unitreerobotics/unitree_ros.git

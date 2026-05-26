@@ -1,0 +1,14 @@
+Randomization from URDF report
+
+Sources:
+  urdf: /home/nszb/python_text/fanfan/urdf/fanfan.urdf
+  robot_cfg: /home/nszb/python_text/lsaacGym/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/fanfan_rl_cpg/fanfan_robot_cfg.py
+  motor_profile: /home/nszb/python_text/lsaacGym/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/fanfan_rl_cpg/config/motor_profile.yaml
+  motor_profile_fitted: /home/nszb/python_text/lsaacGym/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/fanfan_rl_cpg/config/motor_profile_fitted.yaml
+
+URDF-derived ranges: mass, inertia, CoM, joint zero/reset noise, terrain scale, push scale.
+Motor-profile-derived ranges: torque limit, motor strength, PD gains, action delay when fitted data exists.
+Conservative defaults: friction, restitution, slope, CPG duty-factor scale.
+
+
+First version should enable only the items in default_enabled_first_version.

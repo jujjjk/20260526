@@ -1,0 +1,235 @@
+{
+    "fanfan_a1_clean": {
+        "tasks": {
+            "flat": {
+                "gym_id": "Isaac-Velocity-Flat-FanfanA1Clean-v0",
+                "env_cfg": "FanfanA1CleanFlatEnvCfg",
+                "rsl_rl_cfg": "UnitreeA1FlatPPORunnerCfg",
+                "skrl_cfg": "skrl_flat_ppo_cfg.yaml",
+                "sb3_cfg": "sb3_ppo_cfg.yaml"
+            },
+            "rough": {
+                "gym_id": "Isaac-Velocity-Rough-FanfanA1Clean-v0",
+                "env_cfg": "FanfanA1CleanRoughEnvCfg",
+                "rsl_rl_cfg": "UnitreeA1RoughPPORunnerCfg",
+                "skrl_cfg": "skrl_rough_ppo_cfg.yaml",
+                "sb3_cfg": "sb3_ppo_cfg.yaml"
+            }
+        },
+        "robot": {
+            "base_height": 0.293,
+            "action_joint_pos_scale": 0.10,
+            "joint_drive": {
+                "stiffness": 25.0,
+                "damping": 1.5,
+                "target_type": "position",
+                "drive_type": "force"
+            },
+            "actuator": {
+                "effort_limit_sim": 8.0,
+                "velocity_limit_sim": 20.0,
+                "stiffness": 25.0,
+                "damping": 1.5
+            }
+        },
+        "rsl_rl": {
+            "rough": {
+                "num_steps_per_env": 24,
+                "max_iterations": 1500,
+                "save_interval": 50,
+                "experiment_name": "fanfan_a1_clean_rough",
+                "policy": {
+                    "init_noise_std": 1.0,
+                    "actor_hidden_dims": [
+                        512,
+                        256,
+                        128
+                    ],
+                    "critic_hidden_dims": [
+                        512,
+                        256,
+                        128
+                    ],
+                    "activation": "elu",
+                    "actor_obs_normalization": false,
+                    "critic_obs_normalization": false
+                },
+                "algorithm": {
+                    "value_loss_coef": 1.0,
+                    "use_clipped_value_loss": true,
+                    "clip_param": 0.2,
+                    "entropy_coef": 0.01,
+                    "num_learning_epochs": 5,
+                    "num_mini_batches": 4,
+                    "learning_rate": 0.001,
+                    "schedule": "adaptive",
+                    "gamma": 0.99,
+                    "lam": 0.95,
+                    "desired_kl": 0.01,
+                    "max_grad_norm": 1.0
+                }
+            },
+            "flat": {
+                "num_steps_per_env": 24,
+                "max_iterations": 300,
+                "save_interval": 50,
+                "experiment_name": "fanfan_a1_clean_flat",
+                "policy": {
+                    "init_noise_std": 1.0,
+                    "actor_hidden_dims": [
+                        128,
+                        128,
+                        128
+                    ],
+                    "critic_hidden_dims": [
+                        128,
+                        128,
+                        128
+                    ],
+                    "activation": "elu",
+                    "actor_obs_normalization": false,
+                    "critic_obs_normalization": false
+                },
+                "algorithm": {
+                    "value_loss_coef": 1.0,
+                    "use_clipped_value_loss": true,
+                    "clip_param": 0.2,
+                    "entropy_coef": 0.01,
+                    "num_learning_epochs": 5,
+                    "num_mini_batches": 4,
+                    "learning_rate": 0.001,
+                    "schedule": "adaptive",
+                    "gamma": 0.99,
+                    "lam": 0.95,
+                    "desired_kl": 0.01,
+                    "max_grad_norm": 1.0
+                }
+            }
+        },
+        "skrl": {
+            "rough": {
+                "seed": 42,
+                "rollouts": 24,
+                "learning_epochs": 5,
+                "mini_batches": 4,
+                "discount_factor": 0.99,
+                "lambda": 0.95,
+                "learning_rate": 0.001,
+                "learning_rate_scheduler": "KLAdaptiveLR",
+                "kl_threshold": 0.01,
+                "grad_norm_clip": 1.0,
+                "ratio_clip": 0.2,
+                "value_clip": 0.2,
+                "entropy_loss_scale": 0.01,
+                "value_loss_scale": 1.0,
+                "trainer_timesteps": 36000,
+                "network_layers": [
+                    512,
+                    256,
+                    128
+                ],
+                "activation": "elu"
+            },
+            "flat": {
+                "seed": 42,
+                "rollouts": 24,
+                "learning_epochs": 5,
+                "mini_batches": 4,
+                "discount_factor": 0.99,
+                "lambda": 0.95,
+                "learning_rate": 0.001,
+                "learning_rate_scheduler": "KLAdaptiveLR",
+                "kl_threshold": 0.01,
+                "grad_norm_clip": 1.0,
+                "ratio_clip": 0.2,
+                "value_clip": 0.2,
+                "entropy_loss_scale": 0.01,
+                "value_loss_scale": 1.0,
+                "trainer_timesteps": 7200,
+                "network_layers": [
+                    128,
+                    128,
+                    128
+                ],
+                "activation": "elu"
+            }
+        },
+        "sb3": {
+            "seed": 42,
+            "n_timesteps": 50000000.0,
+            "policy": "MlpPolicy",
+            "n_steps": 24,
+            "n_minibatches": 4,
+            "gae_lambda": 0.95,
+            "gamma": 0.99,
+            "n_epochs": 5,
+            "ent_coef": 0.005,
+            "learning_rate": 0.001,
+            "clip_range": 0.2,
+            "net_arch": [
+                512,
+                256,
+                128
+            ],
+            "activation_fn": "nn.ELU",
+            "vf_coef": 1.0,
+            "max_grad_norm": 1.0,
+            "normalize_input": true,
+            "normalize_value": false,
+            "clip_obs": 10.0
+        },
+        "flat_env_overrides": {
+            "terrain_type": "plane",
+            "terrain_generator": null,
+            "height_scan": null,
+            "terrain_curriculum": null,
+            "command_ranges": {
+                "lin_vel_x": [
+                    0.0,
+                    0.30
+                ],
+                "lin_vel_y": [
+                    0.0,
+                    0.0
+                ],
+                "ang_vel_z": [
+                    0.0,
+                    0.0
+                ],
+                "heading": [
+                    0.0,
+                    0.0
+                ]
+            },
+            "heading_command": false,
+            "rel_heading_envs": 0.0,
+            "rel_standing_envs": 0.2
+        },
+        "reward_overrides": {
+            "rough": {
+                "feet_air_time": 0.01,
+                "dof_torques_l2": -0.0002,
+                "track_lin_vel_xy_exp": 1.5,
+                "track_ang_vel_z_exp": 0.75,
+                "dof_acc_l2": -0.0000005,
+                "undesired_contacts": null
+            },
+            "flat": {
+                "flat_orientation_l2": -4.0,
+                "feet_air_time": 0.06,
+                "feet_air_time_threshold": 0.22,
+                "lin_vel_z_l2": -8.0,
+                "ang_vel_xy_l2": -0.35,
+                "action_rate_l2": -0.06,
+                "dof_acc_l2": -0.0000008,
+                "base_height": {
+                    "weight": -15.0,
+                    "target_height": 0.293
+                },
+                "joint_deviation": -0.05,
+                "feet_slide": -0.35,
+                "undesired_contacts": -2.0
+            }
+        }
+    }
+}

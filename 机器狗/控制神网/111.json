@@ -1,0 +1,626 @@
+{
+    "conversation_summary_version": "2026-05-05_mydog_ros2_onnx_deploy_context_v1",
+    "language": "zh-CN",
+    "important_note": "该摘要不包含隐藏系统/开发者指令原文；只保留用户项目、代码、调试过程、结论、参数和下一步操作上下文。",
+    "project": {
+        "name": "MyDog 四足机器人 RL 真机部署",
+        "robot_type": "12DoF quadruped",
+        "hardware_target": "Jetson NX / Yahboom Jetson",
+        "os_ros": {
+            "ros2_distro": "Humble",
+            "ros_domain_id_seen": 99,
+            "jetson_ips_seen": [
+                "172.19.50.175",
+                "172.17.0.1",
+                "172.19.19.145"
+            ]
+        },
+        "goal": "把 IsaacLab/RSL-RL 训练出的平地行走策略部署到 Jetson NX ROS2 中，实时读取 IMU 与 12 个电机反馈，拼接 36 维 obs，ONNX 推理，再转成 12 个真机电机目标角发送。",
+        "current_stage": "ROS2 节点、IMU、电机反馈、36维obs、ONNX推理、target_real生成均已跑通；正在做悬空真机策略发送调试。"
+    },
+    "high_level_architecture": {
+        "recommended_structure": {
+            "node_name": "mydog_policy_node",
+            "inside_node_modules": [
+                "imu_interface: 直接读 /dev/myimu 串口，也可以以后改成订阅 /imu/data_raw",
+                "motor_interface: 读取已有 FastAPI 12路电机状态接口",
+                "command_interface: 订阅 /cmd_vel，映射为 cmd_vx/cmd_vy/cmd_wz",
+                "obs_builder: 拼 IsaacLab 平地策略 36维输入",
+                "policy_runner: 加载 ONNX，输入 [1,36]，输出 [1,12]",
+                "action_mapper: 将策略 action 转成真机12个电机目标角",
+                "sender: enable_send=True 时通过 FastAPI 发送 target_real"
+            ]
+        },
+        "control_chain": [
+            "FastAPI 电机服务启动",
+            "IMU 串口服务由 ROS2 节点内部打开",
+            "默认站立：让真机进入训练初始站姿",
+            "ObsBuilder36 获取 IMU + motor q/dq + cmd_vel",
+            "拼 obs[36]",
+            "ONNX 推理得到 action[12]",
+            "clip action",
+            "action_scale=0.22 转成目标角",
+            "semantic_mapper 将 policy 顺序和语义转换为 real motor order",
+            "通过 FastAPI 快速接口发送 12路 motion_control"
+        ],
+        "ros2_topics": {
+            "subscribe": {
+                "/cmd_vel": "geometry_msgs/msg/Twist; linear.x -> cmd_vx, linear.y -> cmd_vy, angular.z -> cmd_wz"
+            },
+            "publish": {
+                "/mydog/policy_obs": "std_msgs/Float32MultiArray, 36维策略输入",
+                "/mydog/policy_action": "std_msgs/Float32MultiArray, 12维裁剪后的策略动作",
+                "/mydog/target_real": "std_msgs/Float32MultiArray, 真机电机顺序的12维目标角"
+            }
+        }
+    },
+    "file_paths_and_workspace": {
+        "ros2_workspace": "/home/jetson/mydog_ros2_ws",
+        "ros2_package": "/home/jetson/mydog_ros2_ws/src/mydog_policy",
+        "ros2_python_package": "/home/jetson/mydog_ros2_ws/src/mydog_policy/mydog_policy",
+        "policy_onnx_path": "/home/jetson/mydog_ros2_ws/src/mydog_policy/resource/policy.onnx",
+        "deploy_folder": "/home/jetson/mydog_deploy",
+        "imu_folder": "/home/jetson/mydog_imu",
+        "imu_interface_original": "/home/jetson/mydog_imu/interface/imu_serial_interface.py",
+        "ros2_node_file": "/home/jetson/mydog_ros2_ws/src/mydog_policy/mydog_policy/mydog_policy_node.py",
+        "semantic_mapper_file": "/home/jetson/mydog_ros2_ws/src/mydog_policy/mydog_policy/semantic_mapper.py",
+        "obs_builder_file": "/home/jetson/mydog_ros2_ws/src/mydog_policy/mydog_policy/obs_builder.py",
+        "motor_interface_file": "/home/jetson/mydog_ros2_ws/src/mydog_policy/mydog_policy/motor_state_interface.py",
+        "fastapi_app_file": "用户电机服务目录/app.py，具体目录需用户确认"
+    },
+    "imu": {
+        "device": "/dev/myimu",
+        "communication": "USB serial / UART",
+        "baudrate": 115200,
+        "library_files_provided": [
+            "YbImuLib.zip",
+            "YbImu_ReadData_Serial.py",
+            "imu_ros2_device"
+        ],
+        "installation": [
+            "sudo apt install python3-pip -y",
+            "sudo pip3 install pyserial smbus2",
+            "python3 -m serial.tools.list_ports -v"
+        ],
+        "ports_seen": {
+            "/dev/ttyUSB0": "QinHeng CH340 serial converter, VID:PID=1A86:7523",
+            "/dev/ttyUSB1": "QinHeng USB Serial, VID:PID=1A86:7522"
+        },
+        "udev_alias": "SERIAL_PORT = /dev/myimu 已设置",
+        "successful_output_examples": {
+            "acceleration_g": "[0.028,0.001,1.018] 等",
+            "gyro_rad_s": "[0.018,0,0] 左右",
+            "projected_gravity": "静止水平时接近 [0,0,-1]，实际多次看到约 [-0.02,-0.005,-0.999] 或 [-0.001,-0.002,-0.99999]"
+        },
+        "valid_false_at_start": "刚启动第一帧可能 valid=False，属于正常，因为接收线程还没拿到第一帧。",
+        "important": "IMU坐标系必须和 IsaacLab 训练一致；projected_gravity 静止时接近 [0,0,-1] 是关键验证。"
+    },
+    "motor_ids_and_semantics": {
+        "real_motor_order": "FR, FL, RL, RR",
+        "policy_joint_order": "FR, FL, RR, RL",
+        "motor_ids_hex_to_decimal": {
+            "0x11": 17,
+            "0x12": 18,
+            "0x13": 19,
+            "0x21": 33,
+            "0x22": 34,
+            "0x23": 35,
+            "0x31": 49,
+            "0x32": 50,
+            "0x33": 51,
+            "0x41": 65,
+            "0x42": 66,
+            "0x43": 67
+        },
+        "motor_joint_mapping_real_order": [
+            {
+                "real_index": 0,
+                "motor_id": "0x11",
+                "decimal": 17,
+                "joint": "FR_hip_joint",
+                "description": "右前髋关节"
+            },
+            {
+                "real_index": 1,
+                "motor_id": "0x12",
+                "decimal": 18,
+                "joint": "FR_thigh_joint",
+                "description": "右前大臂/大腿"
+            },
+            {
+                "real_index": 2,
+                "motor_id": "0x13",
+                "decimal": 19,
+                "joint": "FR_calf_joint",
+                "description": "右前小腿"
+            },
+            {
+                "real_index": 3,
+                "motor_id": "0x21",
+                "decimal": 33,
+                "joint": "FL_hip_joint",
+                "description": "左前髋关节"
+            },
+            {
+                "real_index": 4,
+                "motor_id": "0x22",
+                "decimal": 34,
+                "joint": "FL_thigh_joint",
+                "description": "左前大臂/大腿"
+            },
+            {
+                "real_index": 5,
+                "motor_id": "0x23",
+                "decimal": 35,
+                "joint": "FL_calf_joint",
+                "description": "左前小腿"
+            },
+            {
+                "real_index": 6,
+                "motor_id": "0x31",
+                "decimal": 49,
+                "joint": "RL_hip_joint",
+                "description": "左后髋关节"
+            },
+            {
+                "real_index": 7,
+                "motor_id": "0x32",
+                "decimal": 50,
+                "joint": "RL_thigh_joint",
+                "description": "左后大臂/大腿"
+            },
+            {
+                "real_index": 8,
+                "motor_id": "0x33",
+                "decimal": 51,
+                "joint": "RL_calf_joint",
+                "description": "左后小腿"
+            },
+            {
+                "real_index": 9,
+                "motor_id": "0x41",
+                "decimal": 65,
+                "joint": "RR_hip_joint",
+                "description": "右后髋关节"
+            },
+            {
+                "real_index": 10,
+                "motor_id": "0x42",
+                "decimal": 66,
+                "joint": "RR_thigh_joint",
+                "description": "右后大臂/大腿"
+            },
+            {
+                "real_index": 11,
+                "motor_id": "0x43",
+                "decimal": 67,
+                "joint": "RR_calf_joint",
+                "description": "右后小腿"
+            }
+        ],
+        "policy_to_real_index": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            9,
+            10,
+            11,
+            6,
+            7,
+            8
+        ],
+        "policy_to_real_index_meaning": "policy 顺序 FR,FL,RR,RL；real 顺序 FR,FL,RL,RR；所以 RR 和 RL 后腿需要交换。",
+        "semantic_layers": [
+            "电机ID属于哪个物理关节",
+            "12维数组顺序",
+            "关节正负方向 joint_sign",
+            "训练默认站姿 default_joint_angle",
+            "真机零点偏移 real_zero_offset_policy_order"
+        ]
+    },
+    "isaaclab_training_policy": {
+        "task": "Isaac-Velocity-Flat-MyDog-v0",
+        "framework": "RSL-RL / IsaacLab",
+        "policy_input_dim": 36,
+        "policy_output_dim": 12,
+        "onnx_input_output_seen": {
+            "input": "obs [1,36]",
+            "output": "actions [1,12]"
+        },
+        "action_scale_training": 0.22,
+        "formula_action_to_target_policy_space": "target_policy_abs = default_joint_angle + action_scale * clipped_action",
+        "final_deploy_action_scale_should_be": 0.22,
+        "initial_stance_current_true_training": {
+            "pos_z": 0.372,
+            "policy_order_FR_FL_RR_RL": [
+                -0.10,
+                0.3491,
+                -0.78,
+                0.10,
+                0.3491,
+                -0.78,
+                -0.20,
+                0.23,
+                -0.3491,
+                0.20,
+                0.23,
+                -0.3491
+            ],
+            "joint_pos_dict": {
+                "FR_hip_joint": -0.10,
+                "FR_thigh_joint": 0.3491,
+                "FR_calf_joint": -0.78,
+                "FL_hip_joint": 0.10,
+                "FL_thigh_joint": 0.3491,
+                "FL_calf_joint": -0.78,
+                "RR_hip_joint": -0.20,
+                "RR_thigh_joint": 0.23,
+                "RR_calf_joint": -0.3491,
+                "RL_hip_joint": 0.20,
+                "RL_thigh_joint": 0.23,
+                "RL_calf_joint": -0.3491
+            },
+            "actuator_training": {
+                "effort_limit_sim": 40.0,
+                "velocity_limit_sim": 40.0,
+                "stiffness": 40.0,
+                "damping": 5
+            }
+        },
+        "old_wrong_default_stance": {
+            "note": "之前一度按旧默认站姿 0.62/-1.58/0.95/-1.62 算，导致 q_policy 不对、action 大量饱和；后来确认 ONNX 对应的是新的初始站姿。",
+            "old_policy_order": [
+                0.0,
+                0.62,
+                -1.58,
+                0.0,
+                0.62,
+                -1.58,
+                0.0,
+                0.95,
+                -1.62,
+                0.0,
+                0.95,
+                -1.62
+            ]
+        },
+        "obs_36_layout": [
+            {
+                "slice": "0:3",
+                "name": "base_lin_vel",
+                "source": "目前没有状态估计器，临时置 [0,0,0]"
+            },
+            {
+                "slice": "3:6",
+                "name": "base_ang_vel",
+                "source": "IMU gyro rad/s"
+            },
+            {
+                "slice": "6:9",
+                "name": "projected_gravity",
+                "source": "IMU quaternion/姿态转换，静止接近 [0,0,-1]"
+            },
+            {
+                "slice": "9:12",
+                "name": "velocity_commands",
+                "source": "/cmd_vel or manual cmd [vx,vy,wz]"
+            },
+            {
+                "slice": "12:24",
+                "name": "joint_pos",
+                "source": "q_policy = q_abs_policy - default_joint_angle"
+            },
+            {
+                "slice": "24:36",
+                "name": "joint_vel",
+                "source": "dq_policy"
+            }
+        ],
+        "example_good_q_policy_after_correct_default": "默认站立后 obs[12:24] 大多接近 0，例如 hip 约 ±0.048~0.055，thigh/calf 约 ±0.005 附近，说明默认站姿和训练初始姿态对齐。"
+    },
+    "default_stand_pose_real_order": {
+        "source": "index.html DEFAULT_STAND_POSE",
+        "kp": 40.0,
+        "kd": 5.0,
+        "real_motor_order": "0x11,0x12,0x13,0x21,0x22,0x23,0x31,0x32,0x33,0x41,0x42,0x43",
+        "pose": [
+            {
+                "id": "0x11",
+                "position": 0.15708,
+                "joint": "FR_hip"
+            },
+            {
+                "id": "0x12",
+                "position": 0.349066,
+                "joint": "FR_thigh"
+            },
+            {
+                "id": "0x13",
+                "position": -0.785398,
+                "joint": "FR_calf"
+            },
+            {
+                "id": "0x21",
+                "position": -0.157081,
+                "joint": "FL_hip"
+            },
+            {
+                "id": "0x22",
+                "position": -0.349067,
+                "joint": "FL_thigh"
+            },
+            {
+                "id": "0x23",
+                "position": 0.785397,
+                "joint": "FL_calf"
+            },
+            {
+                "id": "0x31",
+                "position": 0.157078,
+                "joint": "RL_hip"
+            },
+            {
+                "id": "0x32",
+                "position": -0.226897,
+                "joint": "RL_thigh"
+            },
+            {
+                "id": "0x33",
+                "position": 0.349065,
+                "joint": "RL_calf"
+            },
+            {
+                "id": "0x41",
+                "position": -0.15708,
+                "joint": "RR_hip"
+            },
+            {
+                "id": "0x42",
+                "position": 0.226904,
+                "joint": "RR_thigh"
+            },
+            {
+                "id": "0x43",
+                "position": -0.349066,
+                "joint": "RR_calf"
+            }
+        ],
+        "usage": "策略接管前必须先让真机处于这个训练初始站立姿态附近，然后 q_policy 才会接近0。"
+    },
+    "semantic_mapper": {
+        "core_purpose": "处理 real motor order 到 policy order、joint_sign 正负方向、默认站姿、零点偏移，以及 policy action 到 real target 的转换。",
+        "default_joint_angle_should_be_current_training_policy_order": [
+            -0.10,
+            0.3491,
+            -0.78,
+            0.10,
+            0.3491,
+            -0.78,
+            -0.20,
+            0.23,
+            -0.3491,
+            0.20,
+            0.23,
+            -0.3491
+        ],
+        "formula_real_to_policy": {
+            "step1": "q_real_ordered = q_real[policy_to_real_index]",
+            "step2": "dq_real_ordered = dq_real[policy_to_real_index]",
+            "step3": "q_abs_policy = joint_sign * (q_real_ordered - real_zero_offset_policy_order)",
+            "step4": "dq_policy = joint_sign * dq_real_ordered",
+            "step5": "q_obs_policy = q_abs_policy - default_joint_angle"
+        },
+        "formula_policy_action_to_real_target": {
+            "step1": "target_policy_abs = default_joint_angle + action_scale * action_policy",
+            "step2": "target_real_policy_order = joint_sign * target_policy_abs + real_zero_offset_policy_order",
+            "step3": "target_real[policy_to_real_index] = target_real_policy_order"
+        },
+        "joint_sign_status": {
+            "note": "用户说关节转义会自己修改。对话中曾按当前效果假定过某组 joint_sign，但最终应以 semantic_mapper.py 实际文件为准。",
+            "must_verify": true
+        },
+        "zero_offset_status": "如果默认站立后 q_policy 不接近0，需要基于默认站姿标定 real_zero_offset_policy_order；不能在0点状态下标定。"
+    },
+    "fastapi_motor_service": {
+        "app_name": "RS04 Control API",
+        "base_url": "http://127.0.0.1:8000",
+        "start_command_template": "cd /你的电机服务目录 && uvicorn app:app --host 0.0.0.0 --port 8000",
+        "static_frontend": "index.html served from /static and /",
+        "existing_important_endpoints": {
+            "GET /api": "health check, returns motor_ids",
+            "POST /api/enable": "enable selected or all motors",
+            "POST /api/stop?clear_error=false": "stop selected/all motors",
+            "POST /api/zero": "set hardware zero after optional stop and motion mode",
+            "GET /api/state?motor_id=17": "get one motor state; no motor_id returns all",
+            "POST /api/rs04/motion_mode_run": "single motor motion mode run; does set_mode(0), optional enable, motion_control",
+            "POST /api/rs04/motion_mode_run_batch": "batch motion mode; does optional stop, set_mode(0) for each, optional enable, then motion_control; good for default stand/init, not high-frequency policy loop",
+            "POST /api/rs04/pp_mode_run": "position profile mode",
+            "POST /api/rs04/speed_mode_run": "speed mode",
+            "POST /api/rs04/current_mode_run": "current mode",
+            "POST /api/raw_hex": "send raw 12-byte hex frame"
+        },
+        "critical_new_endpoint_to_add_only_append_not_overwrite": {
+            "name": "POST /api/rs04/motion_batch_fast",
+            "purpose": "高频策略循环专用，只执行 motion_control，不重复 set_mode，不 enable，不 sleep。",
+            "append_location": "紧跟在 rs04_motion_mode_run_batch() 后面追加，不能删除原接口。",
+            "code_to_append": "@app.post(\"/api/rs04/motion_batch_fast\")\ndef rs04_motion_batch_fast(cmd: MotionBatchCmd):\n    \"\"\"\n    高频策略控制专用接口。\n    这个接口只发送 motion_control，不重复 set_mode，不重复 enable，不 sleep。\n    使用前提：电机已经进入运控模式、已经 enable、已经完成默认站立。\n    \"\"\"\n    for item in cmd.items:\n        _get_motor(item.motor_id).motion_control(\n            torque=item.torque,\n            position=item.position,\n            speed=item.speed,\n            kp=item.kp,\n            kd=item.kd,\n        )\n    return {\"ok\": True, \"mode\": \"motion_batch_fast\", \"count\": len(cmd.items)}"
+        },
+        "important_warning": "之前助手错误生成过一个替代 app 文件并可能删掉接口，用户指出不能覆盖。正确做法是只在原 app.py 追加 motion_batch_fast，不要覆盖整个 app.py。"
+    },
+    "motor_state_interface": {
+        "real_api_pattern": "/api/state?motor_id=17 等",
+        "noted_correction": "最初以为 /api/state 可直接整体读；后来确认用户实际验证的是按 motor_id 逐个读。最终 motor_state_interface.py 按 12 个 motor_id 分别请求。",
+        "snapshot_fields": [
+            "angle",
+            "speed",
+            "torque",
+            "temp",
+            "error_code",
+            "online",
+            "last_update_ts",
+            "mode_state",
+            "age_ms",
+            "board_tag",
+            "snapshot_seq",
+            "board_tick_ms"
+        ],
+        "age_ms_status": {
+            "good": "0~20ms 左右，例如 Board A/B 输出 age=0~14ms，OK",
+            "bad": "几千ms并持续增长，例如 max_age=1210 -> 8735ms，策略节点会跳过 policy",
+            "threshold_in_node": 100.0,
+            "meaning": "max_age 是12路中最大反馈年龄；只要一路旧，策略跳过。"
+        },
+        "when_age_old": [
+            "确认 FastAPI 服务正在运行",
+            "curl http://127.0.0.1:8000/api",
+            "curl -s 'http://127.0.0.1:8000/api/state?motor_id=17' | python3 -m json.tool",
+            "cd ~/mydog_deploy && python3 motor_state_interface.py 查看12路 age_ms",
+            "重启 uvicorn app:app",
+            "确认 A/B 板 snapshot 正常、CAN反馈正常、电机上电并在线"
+        ]
+    },
+    "ros2_policy_node": {
+        "current_desired_features": [
+            "参数 onnx_path, motor_base_url, policy_hz, action_scale, max_motor_age_ms, enable_send",
+            "参数 startup_stand_first, startup_stand_kp, startup_stand_kd, startup_stand_settle_sec",
+            "参数 send_action_limit, max_target_delta, send_kp, send_kd, send_speed, send_torque, send_enable_first, http_timeout",
+            "enable_send=false 时只发布 obs/action/target，不发送电机",
+            "enable_send=true 时发送 target_real 到 FastAPI fast endpoint",
+            "send_default_stand() 使用 /api/rs04/motion_mode_run_batch",
+            "send_motion_batch() 应使用 /api/rs04/motion_batch_fast",
+            "必须保留 max_age 安全检查",
+            "可选 require_online，默认 false 因 online 字段曾经不稳定"
+        ],
+        "original_uploaded_node_problem": "原 mydog_policy_node.py 中 enable_send=True 处还是 pass，不会真正发命令；action_clip 固定 [-1,1]；action_scale 默认0.20，后确认训练应为0.22。",
+        "imports_problem_fixed": {
+            "mydog_policy_node": "from .obs_builder import ObsBuilder36",
+            "obs_builder": [
+                "from .imu_serial_interface import ImuSerialInterface",
+                "from .motor_state_interface import MotorStateHttpInterface",
+                "from .semantic_mapper import JointSemanticMapper"
+            ],
+            "reason": "ROS2 Python 包内部应使用相对导入，否则 ModuleNotFoundError: No module named 'obs_builder'"
+        },
+        "shutdown_note": "Ctrl+C 后偶发 rclpy shutdown already called，可先忽略；节点停止后 /mydog/policy_obs 不再被发布，echo 会提示 topic does not appear to be published yet。"
+    },
+    "debug_history_and_observations": {
+        "successful_checks": [
+            "IMU 串口读数成功，projected_gravity 静止接近 [0,0,-1]",
+            "电机状态接口能读到 12 路 q_real/dq_real",
+            "修正 default_joint_angle 后，默认站立下 q_policy 接近0",
+            "ROS2 节点启动成功，ONNX input obs [1,36], output actions [1,12]",
+            "ROS2 topic list 可见 /mydog/policy_obs, /mydog/policy_action, /mydog/target_real, /cmd_vel",
+            "max_age 正常时约 12~15ms"
+        ],
+        "common_errors_and_fixes": [
+            {
+                "error": "PermissionError: /dev/ttyUSB0",
+                "fix": "sudo usermod -aG dialout $USER && reboot；或确保 /dev/myimu 权限"
+            },
+            {
+                "error": "ValueError: Invalid format specifier {arr[i]:+ .5f}",
+                "fix": "把 '+ .5f' 改成 '+.5f'；motor_state_interface.py 和 obs_builder.py 都出现过"
+            },
+            {
+                "error": "ModuleNotFoundError: No module named 'obs_builder'",
+                "fix": "ROS2 包内使用 from .obs_builder import ObsBuilder36，并重新 colcon build --symlink-install"
+            },
+            {
+                "error": "topic /mydog/policy_obs does not appear to be published yet",
+                "fix": "策略节点已经 Ctrl+C 停掉或未启动；保持 mydog_policy_node 运行，在另一个终端 echo"
+            },
+            {
+                "error": "HTTPConnectionPool Read timed out read timeout=0.05",
+                "fix": "motion_mode_run_batch 每帧 set_mode/enable/sleep 太慢；追加 /api/rs04/motion_batch_fast 并在策略循环用 fast endpoint；http_timeout 可设0.3~0.5"
+            },
+            {
+                "error": "[SAFE] target jump too large: 0.363 rad > 0.300 rad",
+                "fix": "安全保护触发；悬空测试可提高 max_target_delta 至0.55或0.80，或检查 q_policy/default/action_scale"
+            },
+            {
+                "error": "[SAFE] Motor feedback too old: max_age=1210ms...8735ms",
+                "fix": "电机反馈过旧，先修 FastAPI/电机/CAN/A-B板 snapshot，不要绕过 max_motor_age_ms"
+            }
+        ],
+        "raw_action_observation": {
+            "seen_values": "raw_min约 -3.6~-3.7，raw_max约 3.5~3.6",
+            "interpretation": "ONNX 原始动作不是天然 [-1,1]，部署必须 clip；这可能是 PPO actor 无 tanh 或环境内部裁剪 action。",
+            "clip": "send_action_limit 控制裁剪范围；完整策略通常 clip到 [-1,1]"
+        },
+        "target_jump_example": {
+            "action_scale": 0.22,
+            "send_action_limit": 1.0,
+            "max_target_delta": 0.30,
+            "observed_jump": 0.363,
+            "reason": "target_real 与当前 q_real 差超过安全阈值，节点跳过发送。"
+        }
+    },
+    "recommended_commands": {
+        "build_ros2_package": [
+            "cd ~/mydog_ros2_ws",
+            "colcon build --symlink-install",
+            "source /opt/ros/humble/setup.bash",
+            "source install/setup.bash"
+        ],
+        "start_fastapi": [
+            "cd /你的电机服务目录",
+            "uvicorn app:app --host 0.0.0.0 --port 8000"
+        ],
+        "verify_fastapi": [
+            "curl http://127.0.0.1:8000/api",
+            "curl -s 'http://127.0.0.1:8000/api/state?motor_id=17' | python3 -m json.tool"
+        ],
+        "verify_motor_all": [
+            "cd ~/mydog_deploy",
+            "python3 motor_state_interface.py"
+        ],
+        "run_ros2_node_inference_only": "cd ~/mydog_ros2_ws && source /opt/ros/humble/setup.bash && source install/setup.bash && ros2 run mydog_policy mydog_policy_node --ros-args -p onnx_path:=/home/jetson/mydog_ros2_ws/src/mydog_policy/resource/policy.onnx -p motor_base_url:=http://127.0.0.1:8000 -p policy_hz:=10.0 -p action_scale:=0.22 -p send_action_limit:=1.0 -p max_target_delta:=0.55 -p send_kp:=25.0 -p send_kd:=1.5 -p send_speed:=0.0 -p send_torque:=0.0 -p send_enable_first:=false -p send_stop_first:=false -p startup_stand_first:=true -p startup_stand_kp:=40.0 -p startup_stand_kd:=5.0 -p startup_stand_settle_sec:=2.0 -p http_timeout:=0.5 -p enable_send:=false",
+        "run_ros2_node_suspended_real_debug": "cd ~/mydog_ros2_ws && source /opt/ros/humble/setup.bash && source install/setup.bash && ros2 run mydog_policy mydog_policy_node --ros-args -p onnx_path:=/home/jetson/mydog_ros2_ws/src/mydog_policy/resource/policy.onnx -p motor_base_url:=http://127.0.0.1:8000 -p policy_hz:=10.0 -p action_scale:=0.22 -p send_action_limit:=1.0 -p max_target_delta:=0.55 -p send_kp:=25.0 -p send_kd:=1.5 -p send_speed:=0.0 -p send_torque:=0.0 -p send_enable_first:=false -p send_stop_first:=false -p startup_stand_first:=true -p startup_stand_kp:=40.0 -p startup_stand_kd:=5.0 -p startup_stand_settle_sec:=2.0 -p http_timeout:=0.5 -p enable_send:=true",
+        "echo_topics": [
+            "ros2 topic list",
+            "ros2 topic echo /mydog/policy_obs --once",
+            "ros2 topic echo /mydog/policy_action --once",
+            "ros2 topic echo /mydog/target_real --once"
+        ],
+        "publish_cmd_vel_zero": "ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist \"{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}\"",
+        "publish_cmd_vel_small_forward": "ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist \"{linear: {x: 0.1, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}\""
+    },
+    "runtime_order_from_cold_start": [
+        "终端1：启动 FastAPI 电机服务 uvicorn app:app --host 0.0.0.0 --port 8000",
+        "终端2：source /opt/ros/humble/setup.bash 和 source ~/mydog_ros2_ws/install/setup.bash",
+        "确认 FastAPI /api 与 /api/state?motor_id=17 正常",
+        "确认 12 路 motor_state_interface.py 的 age_ms 为 0~20ms；若 max_age >100ms 持续增长，先修电机反馈",
+        "启动 mydog_policy_node，先 enable_send=false，让 startup_stand_first=true 自动默认站立并开始推理",
+        "终端3 echo /mydog/policy_obs，确认 projected_gravity 接近 [0,0,-1]，q_policy 接近0",
+        "机器狗悬空，停掉 enable_send=false 节点",
+        "重新启动 mydog_policy_node，enable_send=true，观察是否 [SEND] motion batch ok",
+        "若目标跳变过大，先看 max_delta 和 q_policy；悬空可调大 max_target_delta，但落地不要过大",
+        "若电机反馈过旧，停止策略，重启/检查 FastAPI、SPI/CAN、A/B板、电机在线"
+    ],
+    "current_issue_at_conversation_end": {
+        "latest_error": "[SAFE] Motor feedback too old: max_age=1210ms -> 8735ms > 100ms. Skip policy.",
+        "meaning": "策略节点拿到的 12 路电机反馈至少一路已过旧，安全保护跳过 ONNX 控制。",
+        "priority": "先修电机反馈新鲜度，不要绕过 max_motor_age_ms。",
+        "diagnosis_steps": [
+            "停止 ROS2 策略节点",
+            "确认 FastAPI 服务运行：curl http://127.0.0.1:8000/api",
+            "查单路：curl -s 'http://127.0.0.1:8000/api/state?motor_id=17' | python3 -m json.tool",
+            "运行 cd ~/mydog_deploy && python3 motor_state_interface.py，找出哪一路 age_ms 大",
+            "重启 FastAPI：pkill -f 'uvicorn app:app' 后重新 uvicorn",
+            "检查 A/B 板 snapshot，电机电源，CAN线，ID，SPI通信"
+        ]
+    },
+    "safety_rules": [
+        "第一次 enable_send=true 必须机器狗悬空，旁边能随时断电。",
+        "不能拿几秒前的 q_real/dq_real 控制真机；max_age >100ms 时跳过是正确的。",
+        "默认站立用于策略接管前初始化，不应用 fast endpoint；策略循环才用 fast endpoint。",
+        "不要覆盖原 app.py；只追加接口，保留所有已有网页/PP/速度/电流/标零接口。",
+        "不要直接使用 raw action；必须 clip。",
+        "落地参数要比悬空更保守，尤其 max_target_delta 不要太大。",
+        "若前腿不动但后腿动，优先检查前腿 target_real 是否变化、joint_sign/action映射是否正确、Kp/Kd是否太软。"
+    ],
+    "recommended_follow_up_prompt_for_new_llm": "你现在接手的是一个 Jetson NX + ROS2 Humble + IsaacLab ONNX 四足机器人真机部署项目。请严格基于本 JSON 上下文继续，不要重来。当前目标是修复/验证 12路电机反馈 age_ms 过旧问题，并继续悬空测试 mydog_policy_node 的 enable_send=true 控制链路。注意：不要覆盖 app.py，只能追加 /api/rs04/motion_batch_fast；默认站立用 /api/rs04/motion_mode_run_batch；策略循环用 /api/rs04/motion_batch_fast；训练 action_scale=0.22；默认站姿必须使用当前新版 init_state；obs 为36维，ONNX input [1,36], output [1,12]。"
+}

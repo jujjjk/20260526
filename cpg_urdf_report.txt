@@ -1,0 +1,43 @@
+Fanfan CPG URDF report
+
+URDF: /home/nszb/python_text/fanfan/urdf/fanfan.urdf
+leg_order: ['FR', 'FL', 'RR', 'RL']
+joint_order: ['FR_hip_joint', 'FR_thigh_joint', 'FR_calf_joint', 'FL_hip_joint', 'FL_thigh_joint', 'FL_calf_joint', 'RR_hip_joint', 'RR_thigh_joint', 'RR_calf_joint', 'RL_hip_joint', 'RL_thigh_joint', 'RL_calf_joint']
+
+[FR] joints=['FR_hip_joint', 'FR_thigh_joint', 'FR_calf_joint'] foot=FR_foot
+  thigh=0.15606 m calf=0.14894 m leg=0.30500 m
+  nominal_foot_position=[0.19, -0.0451, -0.305001836101256]
+[FL] joints=['FL_hip_joint', 'FL_thigh_joint', 'FL_calf_joint'] foot=FL_foot
+  thigh=0.15606 m calf=0.14894 m leg=0.30500 m
+  nominal_foot_position=[0.19, 0.0451, -0.305001836101256]
+[RR] joints=['RR_hip_joint', 'RR_thigh_joint', 'RR_calf_joint'] foot=RR_foot
+  thigh=0.15606 m calf=0.14894 m leg=0.30500 m
+  nominal_foot_position=[-0.19, -0.06, -0.305]
+[RL] joints=['RL_hip_joint', 'RL_thigh_joint', 'RL_calf_joint'] foot=RL_foot
+  thigh=0.15606 m calf=0.14894 m leg=0.30500 m
+  nominal_foot_position=[-0.19, 0.06, -0.305]
+
+FR_hip_joint: axis=[1.0, 0.0, 0.0] limit={'lower': -0.698131700798, 'upper': 0.314159265359, 'effort': 17.0, 'velocity': 44.0} default=-0.1571 margin=0.471259265359
+FR_thigh_joint: axis=[0.0, 1.0, 0.0] limit={'lower': -1.570796326795, 'upper': 0.645771823238, 'effort': 17.0, 'velocity': 44.0} default=0.3491 margin=0.29667182323799995
+FR_calf_joint: axis=[0.0, 1.0, 0.0] limit={'lower': -2.443460952792, 'upper': 0.35, 'effort': 17.0, 'velocity': 44.0} default=-0.7854 margin=1.1354
+FL_hip_joint: axis=[1.0, 0.0, 0.0] limit={'lower': -0.314159265359, 'upper': 0.698131700798, 'effort': 17.0, 'velocity': 44.0} default=0.1571 margin=0.471259265359
+FL_thigh_joint: axis=[0.0, 1.0, 0.0] limit={'lower': -1.570796326795, 'upper': 0.645771823238, 'effort': 17.0, 'velocity': 44.0} default=0.3491 margin=0.29667182323799995
+FL_calf_joint: axis=[0.0, 1.0, 0.0] limit={'lower': -2.443460952792, 'upper': 0.35, 'effort': 17.0, 'velocity': 44.0} default=-0.7854 margin=1.1354
+RR_hip_joint: axis=[1.0, 0.0, 0.0] limit={'lower': -0.698131700798, 'upper': 0.314159265359, 'effort': 17.0, 'velocity': 44.0} default=-0.1571 margin=0.471259265359
+RR_thigh_joint: axis=[0.0, 1.0, 0.0] limit={'lower': -0.645771823238, 'upper': 1.570796326795, 'effort': 17.0, 'velocity': 44.0} default=0.2269 margin=0.872671823238
+RR_calf_joint: axis=[0.0, 1.0, 0.0] limit={'lower': -2.443460952792, 'upper': 0.35, 'effort': 17.0, 'velocity': 44.0} default=-0.3491 margin=0.6991
+RL_hip_joint: axis=[1.0, 0.0, 0.0] limit={'lower': -0.314159265359, 'upper': 0.698131700798, 'effort': 17.0, 'velocity': 44.0} default=0.1571 margin=0.471259265359
+RL_thigh_joint: axis=[0.0, 1.0, 0.0] limit={'lower': -0.645771823238, 'upper': 1.570796326795, 'effort': 17.0, 'velocity': 44.0} default=0.2269 margin=0.872671823238
+RL_calf_joint: axis=[0.0, 1.0, 0.0] limit={'lower': -2.443460952792, 'upper': 0.35, 'effort': 17.0, 'velocity': 44.0} default=-0.3491 margin=0.6991
+
+CPG recommendation:
+  step_height_m: 0.030500091805062798
+  step_length_min_m: 0.015
+  step_length_max_m: 0.05490016524911303
+  frequency_min_hz: 0.8
+  frequency_max_hz: 1.8
+  duty_factor: 0.6
+  residual_limit_rad: {'hip': 0.04, 'thigh': 0.06, 'calf': 0.06}
+  joint_safety_margin_rad: 0.08
+
+WARNING: URDF cannot determine gait phase/frequency; phase is gait design, frequency comes from speed, step length, motor data, and logs.
