@@ -16,10 +16,49 @@ from .rs01_motor_params import RS01_CONTINUOUS_TORQUE, RS01_KD, RS01_KP, RS01_PE
 ENABLE_FOOT_DEBUG_METRICS = True
 
 
+HEAVY_ROBOT_AUTO_SPEED_STAGES = (
+    {
+        "stage": 1,
+        "start_iter": 0,
+        "end_iter": 10_000,
+        "lin_vel_x": (0.05, 0.10),
+        "rel_standing_envs": 0.25,
+    },
+    {
+        "stage": 2,
+        "start_iter": 10_000,
+        "end_iter": 30_000,
+        "lin_vel_x": (0.05, 0.18),
+        "rel_standing_envs": 0.15,
+    },
+    {
+        "stage": 3,
+        "start_iter": 30_000,
+        "end_iter": 60_000,
+        "lin_vel_x": (0.05, 0.27),
+        "rel_standing_envs": 0.08,
+    },
+    {
+        "stage": 4,
+        "start_iter": 60_000,
+        "end_iter": None,
+        "lin_vel_x": (0.05, 0.35),
+        "rel_standing_envs": 0.05,
+    },
+)
+
+
 @configclass
 class FanfanA1CleanFlatEnvCfg(FanfanA1CleanRoughEnvCfg):
     def __post_init__(self):
         super().__post_init__()
+
+        # Rebalance actuator availability for the corrected 7.24 kg URDF.
+        self.actions.joint_pos.sim_torque_budget_range = (7.0, 12.0)
+        self.actions.joint_pos.sim_short_peak_torque_range = (12.0, 17.0)
+        self.actions.joint_pos.sim_short_peak_prob = 0.05
+        self.actions.joint_pos.sim_motor_strength_scale_range = (0.85, 1.05)
+        self.actions.joint_pos.cpg_cfg.duty_factor = 0.64
 
         # 低能耗和平滑项使用保守初值；先让策略学稳定对称步态，再逐步加大速度/随机化。
         self.rewards.flat_orientation_l2.weight = -3.0
@@ -35,6 +74,12 @@ class FanfanA1CleanFlatEnvCfg(FanfanA1CleanRoughEnvCfg):
         self.rewards.phase_trot_swing_contact.weight = -0.8
         self.rewards.phase_trot_contact_pattern.weight = -0.9
         self.rewards.phase_trot_calf_flexion.weight = -0.5
+        self.rewards.phase_diagonal_support.weight = -0.20
+        self.rewards.phase_diagonal_support_switch.weight = -0.08
+        self.rewards.diagonal_support_accuracy.weight = 0.0
+        self.rewards.fl_rr_support_accuracy.weight = 0.0
+        self.rewards.hip_gate_clamp_ratio.weight = 0.0
+        self.rewards.hip_motion_diagnostic.weight = 0.0
         self.rewards.air_time_variance.weight = -0.2
         self.rewards.excessive_foot_air_time.weight = -4.0
         self.rewards.excessive_foot_air_time.params["max_air_time"] = 0.16
@@ -53,11 +98,11 @@ class FanfanA1CleanFlatEnvCfg(FanfanA1CleanRoughEnvCfg):
         self.rewards.applied_torque_limit.params["torque_limit"] = RS01_PEAK_TORQUE
         # RS01 continuous rating is 6 N*m.  The simulator may peak at 17 N*m,
         # but this term discourages using that peak as normal operating torque.
-        self.rewards.continuous_torque.weight = -0.025
+        self.rewards.continuous_torque.weight = -0.012
         self.rewards.continuous_torque.params["torque_reference"] = RS01_CONTINUOUS_TORQUE
-        self.rewards.low_speed_high_torque.weight = -0.015
+        self.rewards.low_speed_high_torque.weight = -0.007
         self.rewards.low_speed_high_torque.params["torque_reference"] = RS01_CONTINUOUS_TORQUE
-        self.rewards.power.weight = -0.012
+        self.rewards.power.weight = -0.005
         self.rewards.rear_foot_drag.weight = -1.5
         self.rewards.rear_long_contact.weight = -3.5
         self.rewards.rear_long_contact.params["max_contact_time"] = 0.20
@@ -74,12 +119,12 @@ class FanfanA1CleanFlatEnvCfg(FanfanA1CleanRoughEnvCfg):
         self.rewards.calf_front_rear_balance.weight = -2.5
         self.rewards.lin_vel_z_l2.weight = -10.0
         self.rewards.ang_vel_xy_l2.weight = -1.5
-        self.rewards.dof_torques_l2.weight = -2.0e-4
+        self.rewards.dof_torques_l2.weight = -1.0e-4
         # Stage-1C: make raw action size/rate visibly expensive so the ONNX
         # does not enter hardware with large saturated actions at cmd=0.
-        self.rewards.action_l2 = RewTerm(func=base_mdp.action_l2, weight=-0.008)
-        self.rewards.action_rate_l2.weight = -0.025
-        self.rewards.dof_acc_l2.weight = -6.0e-6
+        self.rewards.action_l2 = RewTerm(func=base_mdp.action_l2, weight=-0.004)
+        self.rewards.action_rate_l2.weight = -0.015
+        self.rewards.dof_acc_l2.weight = -3.0e-6
         self.rewards.base_height = RewTerm(
             func=base_mdp.base_height_l2,
             weight=-60.0,
@@ -148,7 +193,7 @@ class FanfanA1CleanFlatEnvCfg(FanfanA1CleanRoughEnvCfg):
                 "threshold": 1.0,
             },
         )
-        self.rewards.track_lin_vel_xy_exp.weight = 0.85
+        self.rewards.track_lin_vel_xy_exp.weight = 2.0
 
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
@@ -172,11 +217,12 @@ class FanfanA1CleanFlatEnvCfg(FanfanA1CleanRoughEnvCfg):
         # expands this during training, while keeping standing envs alive.
         self.commands.base_velocity.heading_command = False
         self.commands.base_velocity.rel_heading_envs = 0.0
-        self.commands.base_velocity.rel_standing_envs = 0.50
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.08)
+        self.commands.base_velocity.rel_standing_envs = 0.25
+        self.commands.base_velocity.ranges.lin_vel_x = (0.05, 0.10)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
         self.commands.base_velocity.ranges.heading = (0.0, 0.0)
+        self.curriculum.auto_speed.params["stages"] = HEAVY_ROBOT_AUTO_SPEED_STAGES
 
 
 class FanfanA1CleanFlatEnvCfg_PLAY(FanfanA1CleanFlatEnvCfg):
@@ -191,6 +237,9 @@ class FanfanA1CleanFlatEnvCfg_PLAY(FanfanA1CleanFlatEnvCfg):
         self.events.rs01_actuator_gains = None
         self.events.rs01_joint_properties = None
         self.curriculum.auto_speed = None
+        # Use a deterministic walking command for checkpoint evaluation.
+        self.commands.base_velocity.rel_standing_envs = 0.0
+        self.commands.base_velocity.ranges.lin_vel_x = (0.15, 0.15)
 
 
 @configclass

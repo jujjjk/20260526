@@ -10,6 +10,7 @@ def base_lin_vel_deploy_corrupted(
     env,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     command_name: str = "base_velocity",
+    mode: str = "noise",
     enable_randomization: bool = True,
     zero_prob: float = 0.15,
     command_prob: float = 0.20,
@@ -25,6 +26,17 @@ def base_lin_vel_deploy_corrupted(
     """
     asset: Articulation = env.scene[asset_cfg.name]
     base_vel = asset.data.root_lin_vel_b[:, :3]
+    mode = str(mode).strip().lower()
+    if mode == "zero":
+        return torch.zeros_like(base_vel)
+    if mode == "sim":
+        return base_vel
+    if mode == "command":
+        cmd = env.command_manager.get_command(command_name)
+        cmd_vel = torch.zeros_like(base_vel)
+        cmd_vel[:, 0] = cmd[:, 0]
+        cmd_vel[:, 1] = cmd[:, 1]
+        return cmd_vel
     if not enable_randomization:
         return base_vel
 

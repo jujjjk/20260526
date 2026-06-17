@@ -589,4 +589,3 @@ class FanfanA1CleanRoughEnvCfg_PLAY(FanfanA1CleanRoughEnvCfg):
         self.events.rs01_actuator_gains = None
         self.events.rs01_joint_properties = None
         self.curriculum.auto_speed = None
-

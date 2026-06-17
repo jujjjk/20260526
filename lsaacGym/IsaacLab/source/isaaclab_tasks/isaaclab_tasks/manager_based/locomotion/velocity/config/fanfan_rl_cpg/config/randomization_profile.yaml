@@ -1,8 +1,8 @@
 source:
-  urdf: E:\python_text\fanfan\fanfan\urdf\fanfan.urdf
-  robot_cfg: E:\python_text\lsaacGym\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\manager_based\locomotion\velocity\config\fanfan_rl_cpg\fanfan_robot_cfg.py
-  motor_profile: E:\python_text\lsaacGym\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\manager_based\locomotion\velocity\config\fanfan_rl_cpg\config\motor_profile.yaml
-  motor_profile_fitted: E:\python_text\lsaacGym\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\manager_based\locomotion\velocity\config\fanfan_rl_cpg\config\motor_profile_fitted.yaml
+  urdf: FANFAN_URDF_PATH or fanfan/urdf/fanfan.urdf
+  robot_cfg: fanfan_rl_cpg/fanfan_robot_cfg.py
+  motor_profile: fanfan_rl_cpg/config/motor_profile.yaml
+  motor_profile_fitted: fanfan_rl_cpg/config/motor_profile_fitted.yaml
 model_summary:
   base_mass_kg: 2.0
   trunk_size_m:

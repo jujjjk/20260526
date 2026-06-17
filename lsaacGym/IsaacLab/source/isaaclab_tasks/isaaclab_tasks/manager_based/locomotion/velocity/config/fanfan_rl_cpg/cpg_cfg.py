@@ -21,7 +21,7 @@ FANFAN_POLICY_JOINT_ORDER = (
 
 @configclass
 class CPGJointSineCfg:
-    hip_amp: float = 0.0
+    hip_amp: float = 0.025
     thigh_amp: float = 0.18
     calf_amp: float = 0.0
     thigh_phase_shift: float = 0.0
@@ -30,6 +30,13 @@ class CPGJointSineCfg:
     swing_lift_calf_amp: float = 0.60
     stance_calf_amp: float = 0.08
     stride_sign: float = -1.0
+    enable_hip_balance: bool = True
+    hip_stance_widen_amp: float = 0.020
+    hip_swing_relax_amp: float = 0.008
+    hip_balance_signs: tuple[float, float, float, float] = (-1.0, 1.0, -1.0, 1.0)
+    hip_balance_use_stance_mask: bool = True
+    hip_balance_smooth_shape: str = "sin"
+    hip_balance_max_abs: float = 0.06
 
 
 @configclass
@@ -79,9 +86,13 @@ class CPGCfg:
     foot_ik_reach_margin: float = 0.010
 
     residual_limit: float = 0.06
-    residual_limit_hip: float = 0.04
+    residual_limit_hip: float = 0.03
     residual_limit_thigh: float = 0.06
     residual_limit_calf: float = 0.06
+    enable_phase_aware_hip_gate: bool = True
+    hip_gate_stance_min_outward: float = 0.008
+    hip_gate_swing_max_outward: float = 0.035
+    hip_gate_side_signs: tuple[float, float, float, float] = (-1.0, 1.0, -1.0, 1.0)
 
     initial_phase_random: bool = True
     motor_profile_path: str = "config/motor_profile_fitted.yaml"

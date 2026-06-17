@@ -237,20 +237,31 @@ class MydogPolicyNode(Node):
         self.declare_parameter("thigh_action_sign", 1.0)
         self.declare_parameter("action_leg_yaw_180", False)
         self.declare_parameter("semantic_yaw_180", False)
-        self.declare_parameter("action_mode", "pure_rl")
+        self.declare_parameter("action_mode", "cpg_residual")
         self.declare_parameter("cpg_gait", "trot")
         self.declare_parameter("cpg_freq_min", 0.8)
         self.declare_parameter("cpg_freq_max", 1.8)
         self.declare_parameter("cpg_k_freq", 3.0)
         self.declare_parameter("cpg_standing_cmd_threshold", 0.03)
         self.declare_parameter("cpg_duty_factor", 0.60)
-        self.declare_parameter("cpg_hip_amp", 0.0)
+        self.declare_parameter("cpg_hip_amp", 0.025)
         self.declare_parameter("cpg_thigh_amp", 0.18)
         self.declare_parameter("cpg_calf_lift_amp", 0.60)
         self.declare_parameter("cpg_stance_calf_amp", 0.08)
         self.declare_parameter("cpg_stride_sign", -1.0)
+        self.declare_parameter("cpg_enable_hip_balance", True)
+        self.declare_parameter("cpg_hip_stance_widen_amp", 0.020)
+        self.declare_parameter("cpg_hip_swing_relax_amp", 0.008)
+        self.declare_parameter("cpg_hip_balance_signs", "-1.0,1.0,-1.0,1.0")
+        self.declare_parameter("cpg_hip_balance_use_stance_mask", True)
+        self.declare_parameter("cpg_hip_balance_smooth_shape", "sin")
+        self.declare_parameter("cpg_hip_balance_max_abs", 0.06)
         self.declare_parameter("cpg_zero_residual_when_standing", True)
-        self.declare_parameter("residual_limit_hip", 0.04)
+        self.declare_parameter("enable_phase_aware_hip_gate", True)
+        self.declare_parameter("hip_gate_stance_min_outward", 0.008)
+        self.declare_parameter("hip_gate_swing_max_outward", 0.035)
+        self.declare_parameter("hip_gate_side_signs", "-1.0,1.0,-1.0,1.0")
+        self.declare_parameter("residual_limit_hip", 0.03)
         self.declare_parameter("residual_limit_thigh", 0.06)
         self.declare_parameter("residual_limit_calf", 0.06)
         self.declare_parameter("clip_action", True)
@@ -394,8 +405,41 @@ class MydogPolicyNode(Node):
         self.cpg_calf_lift_amp = float(self.get_parameter("cpg_calf_lift_amp").value)
         self.cpg_stance_calf_amp = float(self.get_parameter("cpg_stance_calf_amp").value)
         self.cpg_stride_sign = float(self.get_parameter("cpg_stride_sign").value)
+        self.cpg_enable_hip_balance = bool(
+            self.get_parameter("cpg_enable_hip_balance").value
+        )
+        self.cpg_hip_stance_widen_amp = float(
+            self.get_parameter("cpg_hip_stance_widen_amp").value
+        )
+        self.cpg_hip_swing_relax_amp = float(
+            self.get_parameter("cpg_hip_swing_relax_amp").value
+        )
+        self.cpg_hip_balance_signs = self.parse_hip_balance_signs(
+            self.get_parameter("cpg_hip_balance_signs").value
+        )
+        self.cpg_hip_balance_use_stance_mask = bool(
+            self.get_parameter("cpg_hip_balance_use_stance_mask").value
+        )
+        self.cpg_hip_balance_smooth_shape = str(
+            self.get_parameter("cpg_hip_balance_smooth_shape").value
+        ).strip().lower()
+        self.cpg_hip_balance_max_abs = float(
+            self.get_parameter("cpg_hip_balance_max_abs").value
+        )
         self.cpg_zero_residual_when_standing = bool(
             self.get_parameter("cpg_zero_residual_when_standing").value
+        )
+        self.enable_phase_aware_hip_gate = bool(
+            self.get_parameter("enable_phase_aware_hip_gate").value
+        )
+        self.hip_gate_stance_min_outward = float(
+            self.get_parameter("hip_gate_stance_min_outward").value
+        )
+        self.hip_gate_swing_max_outward = float(
+            self.get_parameter("hip_gate_swing_max_outward").value
+        )
+        self.hip_gate_side_signs = self.parse_hip_balance_signs(
+            self.get_parameter("hip_gate_side_signs").value
         )
         self.residual_limit_hip = float(self.get_parameter("residual_limit_hip").value)
         self.residual_limit_thigh = float(self.get_parameter("residual_limit_thigh").value)
@@ -710,7 +754,16 @@ class MydogPolicyNode(Node):
             f"{self.cpg_thigh_amp:.3f}/"
             f"{self.cpg_calf_lift_amp:.3f}/"
             f"{self.cpg_stance_calf_amp:.3f}, "
+            f"hip_balance enabled={self.cpg_enable_hip_balance}, "
+            f"stance/swing/max="
+            f"{self.cpg_hip_stance_widen_amp:.3f}/"
+            f"{self.cpg_hip_swing_relax_amp:.3f}/"
+            f"{self.cpg_hip_balance_max_abs:.3f}, "
+            f"signs={self.cpg_hip_balance_signs.tolist()}, "
             f"cpg_zero_residual_when_standing={self.cpg_zero_residual_when_standing}, "
+            f"hip_gate={self.enable_phase_aware_hip_gate} "
+            f"stance_min={self.hip_gate_stance_min_outward:.3f} "
+            f"swing_max={self.hip_gate_swing_max_outward:.3f}, "
             f"residual_limit hip/thigh/calf="
             f"{self.residual_limit_hip:.3f}/"
             f"{self.residual_limit_thigh:.3f}/"
@@ -770,6 +823,20 @@ class MydogPolicyNode(Node):
         )
         return np.tile(per_leg, 4).astype(np.float32)
 
+    @staticmethod
+    def parse_hip_balance_signs(value):
+        if isinstance(value, str):
+            parts = [x.strip() for x in value.replace(";", ",").split(",") if x.strip()]
+            signs = np.asarray([float(x) for x in parts], dtype=np.float32)
+        else:
+            signs = np.asarray(value, dtype=np.float32).reshape(-1)
+        if signs.shape[0] != 4:
+            raise ValueError(
+                "cpg_hip_balance_signs must contain four values in FR,FL,RR,RL order, "
+                f"got {value!r}"
+            )
+        return signs.astype(np.float32)
+
     def compute_torque_safety_budget_nm(self):
         if self.torque_safety_budget_nm >= 0.0:
             return max(0.0, float(self.torque_safety_budget_nm))
@@ -811,9 +878,20 @@ class MydogPolicyNode(Node):
             calf_lift_amp=self.cpg_calf_lift_amp,
             stance_calf_amp=self.cpg_stance_calf_amp,
             stride_sign=self.cpg_stride_sign,
+            enable_hip_balance=self.cpg_enable_hip_balance,
+            hip_stance_widen_amp=self.cpg_hip_stance_widen_amp,
+            hip_swing_relax_amp=self.cpg_hip_swing_relax_amp,
+            hip_balance_signs=self.cpg_hip_balance_signs,
+            hip_balance_use_stance_mask=self.cpg_hip_balance_use_stance_mask,
+            hip_balance_smooth_shape=self.cpg_hip_balance_smooth_shape,
+            hip_balance_max_abs=self.cpg_hip_balance_max_abs,
             residual_limit_hip=self.residual_limit_hip,
             residual_limit_thigh=self.residual_limit_thigh,
             residual_limit_calf=self.residual_limit_calf,
+            enable_phase_aware_hip_gate=self.enable_phase_aware_hip_gate,
+            hip_gate_stance_min_outward=self.hip_gate_stance_min_outward,
+            hip_gate_swing_max_outward=self.hip_gate_swing_max_outward,
+            hip_gate_side_signs=self.hip_gate_side_signs,
         )
 
     def action_to_policy_target_abs(self, action_policy: np.ndarray) -> np.ndarray:
@@ -865,11 +943,16 @@ class MydogPolicyNode(Node):
                 else:
                     delta_q_rl = action_policy * residual_limits
                 target_policy_abs = q_cpg + delta_q_rl
+                target_policy_abs, delta_q_rl = self.deploy_cpg.apply_phase_aware_hip_gate(
+                    target_policy_abs,
+                    q_cpg,
+                )
                 target_policy_abs = np.clip(
                     target_policy_abs,
                     mapper.policy_lower_limit,
                     mapper.policy_upper_limit,
                 ).astype(np.float32)
+                cpg_info = self.deploy_cpg.info()
 
         self._last_q_cpg_policy_abs = np.asarray(q_cpg, dtype=np.float32).reshape(12).copy()
         self._last_delta_q_rl_policy = np.asarray(delta_q_rl, dtype=np.float32).reshape(12).copy()
@@ -1913,6 +1996,17 @@ class MydogPolicyNode(Node):
                 "joint_probe_name",
                 "target_real_minus_policy_default_real",
                 "stand_pose_source",
+                "expected_support_pair",
+                "support_proxy_winner",
+                "fr_torque_abs_sum",
+                "fl_torque_abs_sum",
+                "rr_torque_abs_sum",
+                "rl_torque_abs_sum",
+                "diag_FR_RL_torque_abs_sum",
+                "diag_FL_RR_torque_abs_sum",
+                "hip_gate_clamp_count",
+                "hip_outward_before_gate",
+                "hip_outward_after_gate",
             ]
         )
         self._debug_csv_file.flush()
@@ -2131,9 +2225,41 @@ class MydogPolicyNode(Node):
         action_policy_obs_real_order[policy_to_real_index] = action_policy_obs
         action_real_order[policy_to_real_index] = action
 
+        measured_torque_policy = np.asarray(measured_torque[policy_to_real_index], dtype=np.float32)
+        leg_torque_abs_sum = np.asarray(
+            [
+                np.sum(np.abs(measured_torque_policy[0:3])),
+                np.sum(np.abs(measured_torque_policy[3:6])),
+                np.sum(np.abs(measured_torque_policy[6:9])),
+                np.sum(np.abs(measured_torque_policy[9:12])),
+            ],
+            dtype=np.float32,
+        )
+        diag_fr_rl_torque = float(leg_torque_abs_sum[0] + leg_torque_abs_sum[3])
+        diag_fl_rr_torque = float(leg_torque_abs_sum[1] + leg_torque_abs_sum[2])
+        support_proxy_winner = "FR_RL" if diag_fr_rl_torque >= diag_fl_rr_torque else "FL_RR"
+        expected_support_pair = "unknown"
+        if cpg_leg_phase.size >= 4:
+            phase01 = np.remainder(cpg_leg_phase[:4], 1.0)
+            swing_fraction = max(1.0 - float(self.cpg_duty_factor), 0.05)
+            stance = phase01 >= swing_fraction
+            fr_rl_score = float(stance[0]) + float(stance[3])
+            fl_rr_score = float(stance[1]) + float(stance[2])
+            expected_support_pair = "FR_RL" if fr_rl_score >= fl_rr_score else "FL_RR"
+        hip_outward_before_gate = np.asarray(
+            cpg_action_info.get("hip_outward_before_gate", np.zeros(4, dtype=np.float32)),
+            dtype=np.float32,
+        ).reshape(-1)
+        hip_outward_after_gate = np.asarray(
+            cpg_action_info.get("hip_outward_after_gate", np.zeros(4, dtype=np.float32)),
+            dtype=np.float32,
+        ).reshape(-1)
+        hip_gate_clamp_count = int(cpg_action_info.get("hip_gate_clamp_count", 0))
+
         for i, (mid, name) in enumerate(zip(motor_ids, real_names)):
             policy_i = int(real_to_policy_index[i])
             policy_name = policy_names[policy_i]
+            leg_i = int(policy_i // 3)
             parts = name.split("_")
             leg_name = parts[0] if len(parts) >= 1 else ""
             joint_type = parts[1] if len(parts) >= 2 else ""
@@ -2251,6 +2377,17 @@ class MydogPolicyNode(Node):
                     str(joint_probe_name),
                     f"{float(q_des[i] - q_policy_default_real[i]):.6f}",
                     str(self.stand_pose_source),
+                    expected_support_pair,
+                    support_proxy_winner,
+                    f"{float(leg_torque_abs_sum[0]):.6f}",
+                    f"{float(leg_torque_abs_sum[1]):.6f}",
+                    f"{float(leg_torque_abs_sum[2]):.6f}",
+                    f"{float(leg_torque_abs_sum[3]):.6f}",
+                    f"{diag_fr_rl_torque:.6f}",
+                    f"{diag_fl_rr_torque:.6f}",
+                    hip_gate_clamp_count,
+                    f"{float(hip_outward_before_gate[leg_i]) if hip_outward_before_gate.size >= 4 else 0.0:.6f}",
+                    f"{float(hip_outward_after_gate[leg_i]) if hip_outward_after_gate.size >= 4 else 0.0:.6f}",
                 ]
             )
         self._debug_csv_file.flush()

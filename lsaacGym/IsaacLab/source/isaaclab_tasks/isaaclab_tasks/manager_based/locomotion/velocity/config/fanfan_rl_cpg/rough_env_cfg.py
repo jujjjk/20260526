@@ -64,6 +64,22 @@ class FanfanA1CleanRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         cpg_cfg.step_height = float(cpg_random.get("step_height_m", cpg_cfg.step_height))
         cpg_cfg.step_length_min = float(cpg_random.get("step_length_min_m", cpg_cfg.step_length_min))
         cpg_cfg.step_length_max = float(cpg_random.get("step_length_max_m", cpg_cfg.step_length_max))
+        cpg_cfg.joint_sine.hip_amp = 0.025
+        cpg_cfg.joint_sine.enable_hip_balance = True
+        cpg_cfg.joint_sine.hip_stance_widen_amp = 0.020
+        cpg_cfg.joint_sine.hip_swing_relax_amp = 0.008
+        # FR/RR have more negative hip room, FL/RL more positive room in the
+        # clips below.  If real-hardware semantic tests show the side direction
+        # is reversed, change only hip_balance_signs, not compute_joint_sine().
+        cpg_cfg.joint_sine.hip_balance_signs = (-1.0, 1.0, -1.0, 1.0)
+        cpg_cfg.joint_sine.hip_balance_max_abs = 0.06
+        cpg_cfg.residual_limit_hip = 0.03
+        cpg_cfg.residual_limit_thigh = 0.06
+        cpg_cfg.residual_limit_calf = 0.06
+        cpg_cfg.enable_phase_aware_hip_gate = True
+        cpg_cfg.hip_gate_stance_min_outward = 0.008
+        cpg_cfg.hip_gate_swing_max_outward = 0.035
+        cpg_cfg.hip_gate_side_signs = (-1.0, 1.0, -1.0, 1.0)
 
         self.actions.joint_pos = CPGFilteredJointPositionActionCfg(
             asset_name="robot",
@@ -142,6 +158,10 @@ class FanfanA1CleanRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             params={
                 "asset_cfg": SceneEntityCfg("robot"),
                 "command_name": "base_velocity",
+                # Match the current hardware deployment default
+                # base_lin_vel_source=zero for short ablations.  Use "sim"
+                # when intentionally training with true simulator velocity.
+                "mode": "zero",
                 "enable_randomization": True,
                 "zero_prob": 0.15,
                 "command_prob": 0.20,
@@ -562,9 +582,29 @@ class FanfanA1CleanRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # enough that exported policies do not saturate on hardware.
         self.rewards.action_l2 = RewTerm(func=base_mdp.action_l2, weight=-0.008)
         self.rewards.action_saturation = RewTerm(func=fanfan_mdp.action_saturation_penalty, weight=-0.015)
-        self.rewards.residual_magnitude = RewTerm(func=fanfan_mdp.residual_magnitude_penalty, weight=-0.40)
+        self.rewards.residual_magnitude = RewTerm(func=fanfan_mdp.residual_magnitude_penalty, weight=-0.30)
         self.rewards.residual_rate = RewTerm(func=fanfan_mdp.residual_rate_penalty, weight=-0.08)
         self.rewards.action_acceleration = RewTerm(func=fanfan_mdp.action_acceleration_penalty, weight=-0.004)
+        self.rewards.hip_residual_saturation = RewTerm(
+            func=fanfan_mdp.hip_residual_saturation_penalty,
+            weight=-0.03,
+            params={"action_name": "joint_pos", "threshold_ratio": 0.85},
+        )
+        self.rewards.hip_filter_tracking_error = RewTerm(
+            func=fanfan_mdp.hip_filter_tracking_error_penalty,
+            weight=-0.03,
+            params={"action_name": "joint_pos", "threshold": 0.015},
+        )
+        self.rewards.hip_motion_diagnostic = RewTerm(
+            func=fanfan_mdp.hip_motion_diagnostic,
+            weight=0.0,
+            params={
+                "action_name": "joint_pos",
+                "source": "q_cmd",
+                "subtract_default": True,
+                "asset_cfg": SceneEntityCfg("robot", joint_names=list(FANFAN_POLICY_JOINT_ORDER)),
+            },
+        )
         self.rewards.torque_rate = RewTerm(
             func=fanfan_mdp.torque_rate_penalty,
             weight=-2.0e-5,
@@ -598,10 +638,86 @@ class FanfanA1CleanRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
                 "command_threshold": 0.03,
             },
         )
+        self.rewards.phase_diagonal_support = RewTerm(
+            func=fanfan_mdp.phase_diagonal_support_penalty,
+            weight=-0.20,
+            params={
+                "sensor_cfg": SceneEntityCfg(
+                    "contact_forces",
+                    body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+                ),
+                "action_name": "joint_pos",
+                "contact_threshold": 1.0,
+                "stance_miss_cost": 0.5,
+                "swing_contact_cost": 0.5,
+                "transition_margin": 0.05,
+                "command_name": "base_velocity",
+                "command_threshold": 0.03,
+            },
+        )
+        self.rewards.phase_diagonal_support_switch = RewTerm(
+            func=fanfan_mdp.phase_diagonal_support_switch_penalty,
+            weight=-0.08,
+            params={
+                "sensor_cfg": SceneEntityCfg(
+                    "contact_forces",
+                    body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+                ),
+                "action_name": "joint_pos",
+                "margin": 0.05,
+                "transition_margin": 0.05,
+                "command_name": "base_velocity",
+                "command_threshold": 0.03,
+            },
+        )
+        self.rewards.diagonal_support_accuracy = RewTerm(
+            func=fanfan_mdp.diagonal_support_accuracy_metric,
+            weight=0.0,
+            params={
+                "sensor_cfg": SceneEntityCfg(
+                    "contact_forces",
+                    body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+                ),
+                "action_name": "joint_pos",
+                "expected_pair": "all",
+                "transition_margin": 0.05,
+                "command_name": "base_velocity",
+                "command_threshold": 0.03,
+            },
+        )
+        self.rewards.fl_rr_support_accuracy = RewTerm(
+            func=fanfan_mdp.diagonal_support_accuracy_metric,
+            weight=0.0,
+            params={
+                "sensor_cfg": SceneEntityCfg(
+                    "contact_forces",
+                    body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+                ),
+                "action_name": "joint_pos",
+                "expected_pair": "FL_RR",
+                "transition_margin": 0.05,
+                "command_name": "base_velocity",
+                "command_threshold": 0.03,
+            },
+        )
+        self.rewards.hip_gate_clamp_ratio = RewTerm(
+            func=fanfan_mdp.hip_gate_clamp_ratio_diagnostic,
+            weight=0.0,
+            params={"action_name": "joint_pos"},
+        )
         self.rewards.track_lin_vel_xy_exp.weight = 0.85
         self.rewards.track_ang_vel_z_exp.weight = 0.50
         self.rewards.lin_vel_z_l2.weight = -12.0
         self.rewards.ang_vel_xy_l2.weight = -1.5
+        self.rewards.base_roll_rate = RewTerm(
+            func=fanfan_mdp.base_roll_rate_penalty,
+            weight=-0.05,
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+                "command_name": "base_velocity",
+                "command_threshold": 0.03,
+            },
+        )
         self.rewards.action_rate_l2.weight = -0.025
         self.rewards.dof_acc_l2.weight = -6.0e-6
 
@@ -674,4 +790,3 @@ class FanfanRlCpgRoughEnvCfg_CPG_ONLY(FanfanA1CleanRoughEnvCfg_PLAY):
         self.commands.base_velocity.ranges.lin_vel_x = (0.06, 0.08)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
-

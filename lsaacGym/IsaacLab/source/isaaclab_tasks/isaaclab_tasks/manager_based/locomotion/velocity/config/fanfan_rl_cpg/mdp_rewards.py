@@ -127,6 +127,74 @@ def per_leg_residual_balance_penalty(env: ManagerBasedRLEnv, action_name: str = 
     return torch.var(leg_rms, dim=1)
 
 
+def hip_residual_saturation_penalty(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    threshold_ratio: float = 0.85,
+) -> torch.Tensor:
+    """Diagnostic/stability penalty for hip residuals that live near their limit.
+
+    This keeps long training runs from solving balance by permanently pinning
+    the hip residual channel at its configured bound.
+    """
+    action_term = env.action_manager.get_term(action_name)
+    delta = getattr(action_term, "last_delta_q_rl", None)
+    cpg = getattr(action_term, "cpg", None)
+    if delta is None or cpg is None:
+        return torch.zeros(env.num_envs, device=env.device)
+    hip_ids = torch.as_tensor((0, 3, 6, 9), device=delta.device)
+    hip_delta = torch.abs(delta[:, hip_ids])
+    hip_limits = cpg.residual_limits[:, hip_ids].to(device=delta.device, dtype=delta.dtype)
+    threshold = float(threshold_ratio) * hip_limits
+    return torch.sum(torch.square(torch.clamp(hip_delta - threshold, min=0.0)), dim=1)
+
+
+def hip_filter_tracking_error_penalty(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    threshold: float = 0.015,
+) -> torch.Tensor:
+    """Diagnostic/stability penalty when the deploy-like filter removes hip motion.
+
+    It compares raw CPG+residual hip targets against the filtered command so
+    TensorBoard can reveal whether the target limiter is eating the balance
+    correction.
+    """
+    action_term = env.action_manager.get_term(action_name)
+    q_raw = getattr(action_term, "last_q_raw_cpg", None)
+    q_cmd = getattr(action_term, "last_q_cmd", None)
+    if q_raw is None or q_cmd is None:
+        return torch.zeros(env.num_envs, device=env.device)
+    hip_ids = torch.as_tensor((0, 3, 6, 9), device=q_raw.device)
+    error = torch.abs(q_raw[:, hip_ids] - q_cmd[:, hip_ids])
+    return torch.sum(torch.square(torch.clamp(error - threshold, min=0.0)), dim=1)
+
+
+def hip_motion_diagnostic(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    source: str = "q_cmd",
+    subtract_default: bool = True,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Return a zero/small-weight hip motion diagnostic for long-run logging.
+
+    Use this as a TensorBoard probe to confirm that CPG or filtered hip targets
+    are actually moving without making it a meaningful optimization objective.
+    """
+    action_term = env.action_manager.get_term(action_name)
+    q = getattr(action_term, "last_q_cmd", None) if source == "q_cmd" else getattr(action_term, "last_q_cpg", None)
+    if q is None:
+        return torch.zeros(env.num_envs, device=env.device)
+    hip_ids = torch.as_tensor((0, 3, 6, 9), device=q.device)
+    hip_q = q[:, hip_ids]
+    if subtract_default:
+        asset: Articulation = env.scene[asset_cfg.name]
+        default_q = asset.data.default_joint_pos[:, asset_cfg.joint_ids if asset_cfg.joint_ids is not None else slice(None)]
+        hip_q = hip_q - default_q[:, hip_ids]
+    return torch.sqrt(torch.mean(torch.square(hip_q), dim=1))
+
+
 def joint_limit_margin_penalty(
     env: ManagerBasedRLEnv,
     margin: float = 0.08,
@@ -160,6 +228,167 @@ def cpg_phase_contact_penalty(
     phase01 = torch.remainder(cpg.last_leg_phase / (2.0 * math.pi), 1.0)
     swing = phase01 >= float(cpg.cfg.duty_factor)
     penalty = torch.sum((swing & in_contact).float(), dim=1)
+    penalty *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > command_threshold
+    return penalty
+
+
+def phase_diagonal_support_penalty(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    action_name: str = "joint_pos",
+    contact_threshold: float = 1.0,
+    stance_miss_cost: float = 0.5,
+    swing_contact_cost: float = 0.5,
+    transition_margin: float = 0.05,
+    command_name: str = "base_velocity",
+    command_threshold: float = 0.03,
+) -> torch.Tensor:
+    """Lightly penalize CPG phase/contact disagreement for diagonal trot support.
+
+    The term is intentionally soft for long training: it ignores phase
+    transitions and does not require a perfectly rigid two-feet-only contact
+    pattern, but it discourages dragging all feet or losing the stance diagonal.
+    """
+    action_term = env.action_manager.get_term(action_name)
+    cpg = getattr(action_term, "cpg", None)
+    if cpg is None:
+        return torch.zeros(env.num_envs, device=env.device)
+
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    foot_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
+    in_contact = torch.norm(foot_forces, dim=-1).max(dim=1)[0] > contact_threshold
+
+    phase01 = torch.remainder(cpg.last_leg_phase / (2.0 * math.pi), 1.0)
+    swing_fraction = max(1.0 - float(cpg.cfg.duty_factor), 0.05)
+    swing = phase01 < swing_fraction
+    away_from_wrap = (phase01 > transition_margin) & (phase01 < 1.0 - transition_margin)
+    away_from_switch = torch.abs(phase01 - swing_fraction) > transition_margin
+    active = away_from_wrap & away_from_switch
+
+    swing_bad = (swing & in_contact & active).float() * swing_contact_cost
+    stance_bad = (~swing & ~in_contact & active).float() * stance_miss_cost
+    penalty = torch.sum(swing_bad + stance_bad, dim=1)
+    penalty *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > command_threshold
+    return penalty
+
+
+def _cpg_diagonal_support_state(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    action_name: str,
+    transition_margin: float,
+    command_name: str,
+    command_threshold: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    action_term = env.action_manager.get_term(action_name)
+    cpg = getattr(action_term, "cpg", None)
+    if cpg is None:
+        zero = torch.zeros(env.num_envs, device=env.device)
+        return zero.bool(), zero.bool(), zero, zero
+
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    foot_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
+    force_norm = torch.norm(foot_forces, dim=-1).max(dim=1)[0]
+    force_proxy = force_norm / torch.clamp(torch.sum(force_norm, dim=1, keepdim=True), min=1.0e-6)
+    diag_fr_rl_proxy = force_proxy[:, 0] + force_proxy[:, 3]
+    diag_fl_rr_proxy = force_proxy[:, 1] + force_proxy[:, 2]
+
+    phase01 = torch.remainder(cpg.last_leg_phase / (2.0 * math.pi), 1.0)
+    swing_fraction = max(1.0 - float(cpg.cfg.duty_factor), 0.05)
+    stance = phase01 >= swing_fraction
+    away_from_wrap = (phase01 > transition_margin) & (phase01 < 1.0 - transition_margin)
+    away_from_switch = torch.abs(phase01 - swing_fraction) > transition_margin
+    active_phase = torch.all(away_from_wrap & away_from_switch, dim=1)
+    moving = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > command_threshold
+
+    fr_rl_stance_score = stance[:, 0].float() + stance[:, 3].float()
+    fl_rr_stance_score = stance[:, 1].float() + stance[:, 2].float()
+    expected_fr_rl = fr_rl_stance_score >= fl_rr_stance_score
+    active = active_phase & moving
+    return expected_fr_rl, active, diag_fr_rl_proxy, diag_fl_rr_proxy
+
+
+def phase_diagonal_support_switch_penalty(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    action_name: str = "joint_pos",
+    margin: float = 0.05,
+    transition_margin: float = 0.05,
+    command_name: str = "base_velocity",
+    command_threshold: float = 0.03,
+) -> torch.Tensor:
+    """Softly reward the expected trot diagonal for taking over load.
+
+    This is a long-training stability term: it uses CPG phase and contact-force
+    proxies to check whether FR+RL and FL+RR alternate support, without forcing
+    a rigid two-foot contact pattern during transitions.
+    """
+    expected_fr_rl, active, diag_fr_rl_proxy, diag_fl_rr_proxy = _cpg_diagonal_support_state(
+        env,
+        sensor_cfg=sensor_cfg,
+        action_name=action_name,
+        transition_margin=transition_margin,
+        command_name=command_name,
+        command_threshold=command_threshold,
+    )
+    expected_proxy = torch.where(expected_fr_rl, diag_fr_rl_proxy, diag_fl_rr_proxy)
+    other_proxy = torch.where(expected_fr_rl, diag_fl_rr_proxy, diag_fr_rl_proxy)
+    return torch.clamp(float(margin) - (expected_proxy - other_proxy), min=0.0) * active.float()
+
+
+def diagonal_support_accuracy_metric(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    action_name: str = "joint_pos",
+    expected_pair: str = "all",
+    transition_margin: float = 0.05,
+    command_name: str = "base_velocity",
+    command_threshold: float = 0.03,
+) -> torch.Tensor:
+    """Zero-weight diagnostic for whether the expected diagonal wins load proxy.
+
+    Set ``expected_pair`` to ``FR_RL`` or ``FL_RR`` to split TensorBoard curves
+    and catch a one-sided support bias before hardware tests.
+    """
+    expected_fr_rl, active, diag_fr_rl_proxy, diag_fl_rr_proxy = _cpg_diagonal_support_state(
+        env,
+        sensor_cfg=sensor_cfg,
+        action_name=action_name,
+        transition_margin=transition_margin,
+        command_name=command_name,
+        command_threshold=command_threshold,
+    )
+    pair = str(expected_pair).strip().upper()
+    if pair == "FR_RL":
+        active = active & expected_fr_rl
+        success = diag_fr_rl_proxy > diag_fl_rr_proxy
+    elif pair == "FL_RR":
+        active = active & ~expected_fr_rl
+        success = diag_fl_rr_proxy > diag_fr_rl_proxy
+    else:
+        success = torch.where(expected_fr_rl, diag_fr_rl_proxy > diag_fl_rr_proxy, diag_fl_rr_proxy > diag_fr_rl_proxy)
+    return success.float() * active.float()
+
+
+def hip_gate_clamp_ratio_diagnostic(env: ManagerBasedRLEnv, action_name: str = "joint_pos") -> torch.Tensor:
+    """Zero-weight diagnostic showing how often the phase-aware hip gate edits residuals."""
+    action_term = env.action_manager.get_term(action_name)
+    value = getattr(action_term, "last_hip_gate_clamp_ratio", None)
+    if value is None:
+        return torch.zeros(env.num_envs, device=env.device)
+    return value
+
+
+def base_roll_rate_penalty(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str = "base_velocity",
+    command_threshold: float = 0.03,
+) -> torch.Tensor:
+    """Lightly penalize large roll rate while preserving useful lateral weight shift."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    roll_rate = asset.data.root_ang_vel_b[:, 0]
+    penalty = torch.square(roll_rate)
     penalty *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > command_threshold
     return penalty
 

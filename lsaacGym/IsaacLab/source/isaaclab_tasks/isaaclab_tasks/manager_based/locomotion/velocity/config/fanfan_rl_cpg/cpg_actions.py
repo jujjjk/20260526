@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import math
 
 import torch
 
@@ -37,6 +38,22 @@ class CPGFilteredJointPositionAction(DeployFilteredJointPositionAction):
             device=self.device,
             dtype=torch.long,
         )
+        self._hip_action_ids = torch.tensor(
+            [idx for idx, name in enumerate(action_joint_order) if "hip" in name],
+            device=self.device,
+            dtype=torch.long,
+        )
+        self._hip_action_leg_ids = torch.tensor(
+            [self.cpg_cfg.leg_order.index(action_joint_order[idx].split("_")[0]) for idx in self._hip_action_ids.tolist()],
+            device=self.device,
+            dtype=torch.long,
+        )
+        self._hip_gate_side_signs_cpg = torch.as_tensor(
+            self.cpg_cfg.hip_gate_side_signs,
+            device=self.device,
+            dtype=torch.float32,
+        ).view(1, 4)
+        self._hip_gate_side_signs_action = self._hip_gate_side_signs_cpg[:, self._hip_action_leg_ids]
 
         default_joint_pos = self._asset.data.default_joint_pos[:, self._joint_ids]
         default_joint_pos_cpg_order = default_joint_pos[:, self._cpg_from_action_ids]
@@ -58,6 +75,16 @@ class CPGFilteredJointPositionAction(DeployFilteredJointPositionAction):
         self.last_clipped_actions = torch.zeros_like(self.processed_actions)
         self.last_q_raw_cpg = torch.zeros_like(self.processed_actions)
         self.last_clip_count = torch.zeros(self.num_envs, device=self.device)
+        self.last_hip_balance_delta = torch.zeros(self.num_envs, len(self.cpg_cfg.leg_order), device=self.device)
+        self.last_hip_residual_abs_mean = torch.zeros(self.num_envs, device=self.device)
+        self.last_hip_filter_error = torch.zeros(self.num_envs, device=self.device)
+        self.last_hip_saturation_count = torch.zeros(self.num_envs, device=self.device)
+        self.last_hip_gate_clamp_count = torch.zeros(self.num_envs, device=self.device)
+        self.last_hip_gate_clamp_ratio = torch.zeros(self.num_envs, device=self.device)
+        self.last_hip_stance_inward_violation = torch.zeros(self.num_envs, device=self.device)
+        self.last_hip_swing_over_outward_violation = torch.zeros(self.num_envs, device=self.device)
+        self.last_hip_outward_before_gate = torch.zeros(self.num_envs, self._hip_action_ids.numel(), device=self.device)
+        self.last_hip_outward_after_gate = torch.zeros_like(self.last_hip_outward_before_gate)
 
     @property
     def cpg(self) -> QuadrupedCPG:
@@ -69,6 +96,62 @@ class CPGFilteredJointPositionAction(DeployFilteredJointPositionAction):
         except Exception:
             return torch.zeros(self.num_envs, 3, device=self.device)
 
+    def _apply_phase_aware_hip_gate(
+        self,
+        q_raw: torch.Tensor,
+        q_cpg: torch.Tensor,
+        delta_q_rl: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if not bool(getattr(self.cpg_cfg, "enable_phase_aware_hip_gate", False)):
+            self.last_hip_gate_clamp_count.zero_()
+            self.last_hip_gate_clamp_ratio.zero_()
+            self.last_hip_stance_inward_violation.zero_()
+            self.last_hip_swing_over_outward_violation.zero_()
+            self.last_hip_outward_before_gate.zero_()
+            self.last_hip_outward_after_gate.zero_()
+            return q_raw, delta_q_rl
+
+        hip_ids = self._hip_action_ids
+        default_hip = self._asset.data.default_joint_pos[:, self._joint_ids][:, hip_ids]
+        side_sign = self._hip_gate_side_signs_action.to(device=q_raw.device, dtype=q_raw.dtype)
+        phase01 = torch.remainder(self._cpg.last_leg_phase / (2.0 * math.pi), 1.0)
+        phase01 = phase01[:, self._hip_action_leg_ids]
+        swing_fraction = max(1.0 - float(self.cpg_cfg.duty_factor), 0.05)
+        swing = phase01 < swing_fraction
+        stance = ~swing
+        moving = (self._cpg.last_frequency > 1.0e-6).unsqueeze(1)
+
+        q_raw_hip = q_raw[:, hip_ids]
+        outward_before = side_sign * (q_raw_hip - default_hip)
+        outward_after = outward_before.clone()
+
+        stance_min = float(getattr(self.cpg_cfg, "hip_gate_stance_min_outward", 0.0))
+        swing_max = float(getattr(self.cpg_cfg, "hip_gate_swing_max_outward", 1.0e6))
+        stance_low = stance & moving & (outward_after < stance_min)
+        swing_high = swing & moving & (outward_after > swing_max)
+        outward_after = torch.where(stance_low, torch.full_like(outward_after, stance_min), outward_after)
+        outward_after = torch.where(swing_high, torch.full_like(outward_after, swing_max), outward_after)
+
+        changed = torch.abs(outward_after - outward_before) > 1.0e-7
+        q_gated = q_raw.clone()
+        q_gated[:, hip_ids] = default_hip + side_sign * outward_after
+        delta_gated = delta_q_rl.clone()
+        delta_gated[:, hip_ids] = q_gated[:, hip_ids] - q_cpg[:, hip_ids]
+
+        self.last_hip_outward_before_gate[:] = outward_before
+        self.last_hip_outward_after_gate[:] = outward_after
+        self.last_hip_gate_clamp_count[:] = torch.sum(changed.float(), dim=1)
+        self.last_hip_gate_clamp_ratio[:] = self.last_hip_gate_clamp_count / max(float(hip_ids.numel()), 1.0)
+        self.last_hip_stance_inward_violation[:] = torch.mean(
+            torch.clamp(stance_min - outward_before, min=0.0) * stance.float() * moving.float(),
+            dim=1,
+        )
+        self.last_hip_swing_over_outward_violation[:] = torch.mean(
+            torch.clamp(outward_before - swing_max, min=0.0) * swing.float() * moving.float(),
+            dim=1,
+        )
+        return q_gated, delta_gated
+
     def process_actions(self, actions: torch.Tensor):
         mode = self.cfg.action_mode
         if not bool(self.cpg_cfg.enable) or mode == "pure_rl" or self.cpg_cfg.mode == "off":
@@ -78,6 +161,20 @@ class CPGFilteredJointPositionAction(DeployFilteredJointPositionAction):
             self.last_clipped_actions[:] = torch.clamp(actions, -1.0, 1.0)
             self.last_q_raw_cpg[:] = self._deploy_q_raw
             self.last_clip_count[:] = torch.sum(torch.abs(actions) > 1.0, dim=1)
+            hip_actions = actions[:, self._hip_action_ids]
+            self.last_hip_balance_delta.zero_()
+            self.last_hip_residual_abs_mean.zero_()
+            self.last_hip_filter_error[:] = torch.mean(
+                torch.abs(self.last_q_raw_cpg[:, self._hip_action_ids] - self.last_q_cmd[:, self._hip_action_ids]),
+                dim=1,
+            )
+            self.last_hip_saturation_count[:] = torch.sum(torch.abs(hip_actions) > 0.75, dim=1)
+            self.last_hip_gate_clamp_count.zero_()
+            self.last_hip_gate_clamp_ratio.zero_()
+            self.last_hip_stance_inward_violation.zero_()
+            self.last_hip_swing_over_outward_violation.zero_()
+            self.last_hip_outward_before_gate.zero_()
+            self.last_hip_outward_after_gate.zero_()
             return
 
         self._raw_actions[:] = actions
@@ -93,19 +190,36 @@ class CPGFilteredJointPositionAction(DeployFilteredJointPositionAction):
         else:
             delta_q_rl = torch.clamp(clipped_actions * residual_limit, min=-residual_limit, max=residual_limit)
 
-        q_raw = q_cpg + delta_q_rl
+        q_raw_unclipped = q_cpg + delta_q_rl
+        if mode == "cpg_residual":
+            q_raw_unclipped, delta_q_rl = self._apply_phase_aware_hip_gate(q_raw_unclipped, q_cpg, delta_q_rl)
+        else:
+            self.last_hip_gate_clamp_count.zero_()
+            self.last_hip_gate_clamp_ratio.zero_()
+            self.last_hip_stance_inward_violation.zero_()
+            self.last_hip_swing_over_outward_violation.zero_()
+            self.last_hip_outward_before_gate.zero_()
+            self.last_hip_outward_after_gate.zero_()
+        q_raw = q_raw_unclipped
+        hip_clip_hit = torch.zeros(self.num_envs, self._hip_action_ids.numel(), dtype=torch.bool, device=self.device)
         if self.cfg.clip is not None:
             q_raw = torch.clamp(q_raw, min=self._clip[:, :, 0], max=self._clip[:, :, 1])
+            hip_clip_hit = torch.abs(q_raw_unclipped[:, self._hip_action_ids] - q_raw[:, self._hip_action_ids]) > 1.0e-6
 
         self._processed_actions[:] = q_raw
         self._deploy_q_raw[:] = q_raw
         self.last_q_cpg[:] = q_cpg
         self.last_delta_q_rl[:] = delta_q_rl
         self.last_q_raw_cpg[:] = q_raw
+        self.last_hip_balance_delta[:] = getattr(self._cpg, "last_hip_balance_delta", self.last_hip_balance_delta)
+        self.last_hip_residual_abs_mean[:] = torch.mean(torch.abs(delta_q_rl[:, self._hip_action_ids]), dim=1)
+        hip_action_saturated = torch.abs(actions[:, self._hip_action_ids]) > 0.75
+        self.last_hip_saturation_count[:] = torch.sum(hip_action_saturated | hip_clip_hit, dim=1)
 
         if not self.cfg.enable_deploy_target_filter:
             self.last_q_cmd[:] = self.processed_actions
             self.last_qdot_cmd.zero_()
+            self.last_hip_filter_error.zero_()
             return
 
         # Reuse the deploy-like limiter from the parent class, but start from
@@ -136,6 +250,7 @@ class CPGFilteredJointPositionAction(DeployFilteredJointPositionAction):
         self._qdot_last_cmd[:] = qdot_cmd
         self.last_q_cmd[:] = q_cmd
         self.last_qdot_cmd[:] = qdot_cmd
+        self.last_hip_filter_error[:] = torch.mean(torch.abs(q_raw[:, self._hip_action_ids] - q_cmd[:, self._hip_action_ids]), dim=1)
 
         self._delay_buffer = torch.roll(self._delay_buffer, shifts=1, dims=1)
         self._delay_buffer[:, 0] = q_cmd
@@ -151,6 +266,16 @@ class CPGFilteredJointPositionAction(DeployFilteredJointPositionAction):
         self._cpg.reset(env_ids_tensor)
         self.last_q_cpg[env_ids_tensor] = self._asset.data.default_joint_pos[env_ids_tensor][:, self._joint_ids]
         self.last_delta_q_rl[env_ids_tensor] = 0.0
+        self.last_hip_balance_delta[env_ids_tensor] = 0.0
+        self.last_hip_residual_abs_mean[env_ids_tensor] = 0.0
+        self.last_hip_filter_error[env_ids_tensor] = 0.0
+        self.last_hip_saturation_count[env_ids_tensor] = 0.0
+        self.last_hip_gate_clamp_count[env_ids_tensor] = 0.0
+        self.last_hip_gate_clamp_ratio[env_ids_tensor] = 0.0
+        self.last_hip_stance_inward_violation[env_ids_tensor] = 0.0
+        self.last_hip_swing_over_outward_violation[env_ids_tensor] = 0.0
+        self.last_hip_outward_before_gate[env_ids_tensor] = 0.0
+        self.last_hip_outward_after_gate[env_ids_tensor] = 0.0
 
 
 @configclass

@@ -39,6 +39,11 @@ class QuadrupedCPG:
         self.last_step_height = torch.full((self.num_envs,), float(cfg.step_height), device=self.device)
         self.last_leg_phase = torch.zeros(self.num_envs, len(cfg.leg_order), device=self.device)
         self.last_q_cpg = self.default_joint_pos.clone()
+        self.last_q_cpg_before_clip = self.default_joint_pos.clone()
+        self.last_hip_stride_delta = torch.zeros(
+            self.num_envs, len(cfg.leg_order), device=self.device, dtype=self.default_joint_pos.dtype
+        )
+        self.last_hip_balance_delta = torch.zeros_like(self.last_hip_stride_delta)
 
         self._residual_limits = self._make_joint_type_tensor(
             hip=float(cfg.residual_limit_hip),
@@ -52,6 +57,14 @@ class QuadrupedCPG:
         self._joint_offsets = torch.tensor(
             cfg.joint_offsets, device=self.device, dtype=self.default_joint_pos.dtype
         ).view(1, -1)
+        self._hip_balance_signs = torch.tensor(
+            cfg.joint_sine.hip_balance_signs, device=self.device, dtype=self.default_joint_pos.dtype
+        ).view(1, -1)
+        if self._hip_balance_signs.shape[1] != len(cfg.leg_order):
+            raise ValueError(
+                "hip_balance_signs must have one value per leg in cfg.leg_order "
+                f"({cfg.leg_order}), got {cfg.joint_sine.hip_balance_signs}."
+            )
 
     @property
     def residual_limits(self) -> torch.Tensor:
@@ -80,6 +93,9 @@ class QuadrupedCPG:
         else:
             self.base_phase[env_ids_tensor] = 0.0
         self.last_q_cpg[env_ids_tensor] = self.default_joint_pos[env_ids_tensor]
+        self.last_q_cpg_before_clip[env_ids_tensor] = self.default_joint_pos[env_ids_tensor]
+        self.last_hip_stride_delta[env_ids_tensor] = 0.0
+        self.last_hip_balance_delta[env_ids_tensor] = 0.0
 
     def compute_frequency(self, commands: torch.Tensor) -> torch.Tensor:
         cmd_x = torch.abs(commands[:, 0])
@@ -123,7 +139,15 @@ class QuadrupedCPG:
         lift_calf_amp = float(self.cfg.joint_sine.swing_lift_calf_amp)
         stance_calf_amp = float(self.cfg.joint_sine.stance_calf_amp)
         stride_sign = float(self.cfg.joint_sine.stride_sign)
+        enable_hip_balance = bool(self.cfg.joint_sine.enable_hip_balance)
+        hip_stance_widen_amp = float(self.cfg.joint_sine.hip_stance_widen_amp)
+        hip_swing_relax_amp = float(self.cfg.joint_sine.hip_swing_relax_amp)
+        hip_balance_max_abs = float(self.cfg.joint_sine.hip_balance_max_abs)
+        hip_balance_use_stance_mask = bool(self.cfg.joint_sine.hip_balance_use_stance_mask)
+        use_sin_balance_shape = str(self.cfg.joint_sine.hip_balance_smooth_shape).lower() == "sin"
         moving = (self.last_frequency > 0.0).to(q.dtype).unsqueeze(1)
+        hip_stride_deltas = torch.zeros_like(self.last_hip_stride_delta)
+        hip_balance_deltas = torch.zeros_like(self.last_hip_balance_delta)
 
         for leg_i, leg in enumerate(self.cfg.leg_order):
             base = leg_i * 3
@@ -136,10 +160,35 @@ class QuadrupedCPG:
             stance_shape = torch.where(swing, torch.zeros_like(phase), torch.sin(math.pi * s_stance))
             stride = torch.where(swing, -1.0 + 2.0 * s_swing, 1.0 - 2.0 * s_stance)
 
-            q[:, base + 0] += moving[:, 0] * hip_amp * stride
+            hip_stride_delta = hip_amp * stride
+            hip_balance_delta = torch.zeros_like(hip_stride_delta)
+            if enable_hip_balance:
+                if use_sin_balance_shape:
+                    stance_weight = stance_shape
+                    swing_weight = swing_shape
+                else:
+                    stance_weight = (~swing).to(q.dtype)
+                    swing_weight = swing.to(q.dtype)
+                if not hip_balance_use_stance_mask:
+                    stance_weight = torch.ones_like(stance_weight)
+                hip_side_sign = self._hip_balance_signs[:, leg_i]
+                stance_widen_delta = hip_side_sign * hip_stance_widen_amp * stance_weight
+                swing_relax_delta = -hip_side_sign * hip_swing_relax_amp * swing_weight
+                hip_balance_delta = torch.clamp(
+                    stance_widen_delta + swing_relax_delta,
+                    min=-hip_balance_max_abs,
+                    max=hip_balance_max_abs,
+                )
+
+            hip_stride_deltas[:, leg_i] = hip_stride_delta
+            hip_balance_deltas[:, leg_i] = hip_balance_delta
+            q[:, base + 0] += moving[:, 0] * (hip_stride_delta + hip_balance_delta)
             q[:, base + 1] += moving[:, 0] * stride_sign * thigh_amp * stride
             q[:, base + 2] += moving[:, 0] * (-lift_calf_amp * swing_shape + stance_calf_amp * stance_shape)
         q = q * self._joint_signs + self._joint_offsets
+        self.last_hip_stride_delta = hip_stride_deltas * moving
+        self.last_hip_balance_delta = hip_balance_deltas * moving
+        self.last_q_cpg_before_clip = q
         return self._clip_to_limits(q)
 
     def compute_foot_trajectory(self, leg_phase: torch.Tensor, commands: torch.Tensor) -> torch.Tensor:
